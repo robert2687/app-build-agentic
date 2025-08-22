@@ -7,11 +7,13 @@ interface FileNode {
   name: string;
   type: 'folder' | 'file';
   extension?: string;
+  content?: string;
   children?: FileNode[];
+  path: string;
 }
 
 interface Agent {
-  name: string;
+  name:string;
   status: 'Idle' | 'Active';
   task?: string;
 }
@@ -79,6 +81,12 @@ const DocumentTextIcon = () => (
     </svg>
 );
 
+const CodeBracketIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 12" />
+    </svg>
+);
+
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-500"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
 const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-red-500"><path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
 const ArrowPathIcon = ({ spinning = true }: { spinning?: boolean }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 text-blue-400 ${spinning ? 'animate-spin' : ''}`}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 11.667 0l3.181-3.183m-4.991-2.691v4.992m0 0-3.182-3.182a8.25 8.25 0 0 1-11.667 0l-3.181 3.182m4.991 2.691H7.965M16.023 9.348A8.25 8.25 0 0 1 19.5 12m0 0a8.25 8.25 0 0 1-3.477 6.651m-3.477-6.651a8.25 8.25 0 0 0-3.477-6.651m3.477 6.651L12 12" /></svg>;
@@ -86,14 +94,14 @@ const SparklesIcon = ({ className = "w-5 h-5 mr-3 text-yellow-400" }) => <svg xm
 
 // --- MOCK DATA ---
 const initialFileStructure: FileNode[] = [
-  { name: 'src', type: 'folder', children: [
-      { name: 'components', type: 'folder', children: []},
-      { name: 'App.tsx', type: 'file', extension: 'tsx' },
+  { name: 'src', type: 'folder', path: 'src', children: [
+      { name: 'App.tsx', type: 'file', extension: 'tsx', path: 'src/App.tsx', content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <div className="bg-slate-900 text-white min-h-screen p-8">\n      <h1 className="text-4xl font-bold">Welcome to your new App!</h1>\n      <p className="mt-4 text-slate-400">Get started by editing this file.</p>\n    </div>\n  );\n}` },
+      { name: 'index.tsx', type: 'file', extension: 'tsx', path: 'src/index.tsx', content: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nconst root = ReactDOM.createRoot(document.getElementById('root'));\nroot.render(<App />);` },
   ]},
-  { name: 'public', type: 'folder', children: [
-      { name: 'index.html', type: 'file', extension: 'html' },
+  { name: 'public', type: 'folder', path: 'public', children: [
+      { name: 'index.html', type: 'file', extension: 'html', path: 'public/index.html', content: `<!DOCTYPE html>\n<html>\n  <head>\n    <title>My App</title>\n    <script src="https://cdn.tailwindcss.com"></script>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/index.tsx"></script>\n  </body>\n</html>` },
   ]},
-  { name: 'package.json', type: 'file', extension: 'json' },
+  { name: 'package.json', type: 'file', extension: 'json', path: 'package.json', content: `{\n  "name": "new-project",\n  "version": "1.0.0",\n  "dependencies": {\n    "react": "^19",\n    "react-dom": "^19"\n  }\n}` },
 ];
 const initialAgents: Agent[] = [
   { name: 'Requirements Analyst', status: 'Idle' },
@@ -124,19 +132,24 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
 // --- CHILD COMPONENTS ---
 
-const FileTree = ({ files, level = 0 }: { files: FileNode[], level?: number }) => (
+const FileTree = ({ files, level = 0, onFileSelect, activeFile }: { files: FileNode[], level?: number, onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => (
   <div style={{ paddingLeft: `${level * 1}rem` }}>
     {files.map(file => (
-      <div key={file.name} className="flex items-center py-1 text-sm text-gray-300 hover:bg-gray-700/50 rounded-md px-2 cursor-pointer transition-colors duration-150">
-        {file.type === 'folder' ? <FolderIcon /> : <FileIcon extension={file.extension} />}
-        <span>{file.name}</span>
-        {file.children && <FileTree files={file.children} level={level + 1} />}
+      <div key={file.path}>
+        <div 
+            onClick={() => file.type === 'file' && onFileSelect(file)}
+            className={`flex items-center py-1 text-sm text-gray-300 rounded-md px-2 transition-colors duration-150 ${file.type === 'file' ? 'cursor-pointer hover:bg-gray-700/50' : ''} ${activeFile?.path === file.path ? 'bg-gray-700' : ''}`}
+        >
+          {file.type === 'folder' ? <FolderIcon /> : <FileIcon extension={file.extension} />}
+          <span>{file.name}</span>
+        </div>
+        {file.children && <FileTree files={file.children} level={level + 1} onFileSelect={onFileSelect} activeFile={activeFile} />}
       </div>
     ))}
   </div>
 );
 
-const LeftPanel = ({ agents }: { agents: Agent[] }) => (
+const LeftPanel = ({ agents, files, onFileSelect, activeFile }: { agents: Agent[], files: FileNode[], onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => (
   <aside className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700 text-white w-72 p-4 flex flex-col shrink-0">
     <div className="flex items-center mb-6">
       <SparklesIcon className="w-6 h-6 mr-2 text-yellow-400" />
@@ -145,7 +158,7 @@ const LeftPanel = ({ agents }: { agents: Agent[] }) => (
     
     <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">Project Files</h2>
     <div className="flex-grow overflow-y-auto mb-6 pr-2 custom-scrollbar">
-      <FileTree files={initialFileStructure} />
+      <FileTree files={files} onFileSelect={onFileSelect} activeFile={activeFile} />
     </div>
 
     <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">AI Agent Team</h2>
@@ -354,13 +367,106 @@ const CodeReviewView = ({ addLog }: { addLog: (source: string, message: string) 
     );
 };
 
-const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, requirements }: { conversation: Message[], addLog: (source: string, message: string) => void, onSendMessage: (text: string) => Promise<void>, onProcessDocument: (docText: string) => Promise<void>, requirements: Requirement[] }) => {
+const CodeEditorView = ({ file, onCodeChange }: { file: FileNode, onCodeChange: (prompt: string) => Promise<void> }) => {
+    const [prompt, setPrompt] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const applySyntaxHighlighting = (code: string, extension?: string) => {
+        if (!extension) return code;
+        let highlighted = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        // Basic syntax highlighting rules
+        if (['tsx', 'js'].includes(extension)) {
+            highlighted = highlighted
+                .replace(/\b(import|from|export|default|const|let|var|function|return|if|else|switch|case|for|while|new|async|await|of|in)\b/g, '<span class="text-purple-400">$&</span>')
+                .replace(/\b(React|useState|useEffect|useCallback|useRef|null|true|false|document|window)\b/g, '<span class="text-sky-400">$&</span>')
+                .replace(/(\'|\")(.*?)(\'|\")/g, '<span class="text-green-400">$&</span>')
+                .replace(/(\/\*[\s\S]*?\*\/)|(\/\/.*)/g, '<span class="text-gray-500">$&</span>')
+                .replace(/(<)(\/?\w+)(.*?)(\/?>)/g, '$1<span class="text-sky-400">$2</span>$3$4');
+        } else if (extension === 'json') {
+             highlighted = highlighted
+                .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, (match) => {
+                    if (/:$/.test(match)) {
+                        return `<span class="text-sky-400">${match}</span>`;
+                    }
+                    return `<span class="text-green-400">${match}</span>`;
+                })
+                .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>');
+        } else if (extension === 'html') {
+             highlighted = highlighted
+                .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>')
+                .replace(/(&lt;)(\/?\w+)/g, '$1<span class="text-sky-400">$2</span>')
+                .replace(/(\w+)=(".*?"|'.*?')/g, '<span class="text-purple-400">$1</span>=<span class="text-green-400">$2</span>');
+        }
+
+        return highlighted;
+    };
+
+    const handleGenerate = async () => {
+        if (!prompt.trim()) return;
+        setIsLoading(true);
+        await onCodeChange(prompt);
+        setPrompt('');
+        setIsLoading(false);
+    };
+
+    return (
+        <div className="h-full flex flex-col bg-gray-900 text-white">
+            <div className="p-4 border-b border-gray-700">
+                <h3 className="font-mono text-lg">{file.path}</h3>
+            </div>
+            <div className="flex-grow flex overflow-hidden">
+                <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+                    <pre className="p-4 font-mono text-sm relative w-full">
+                        <code className="block whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applySyntaxHighlighting(file.content || '', file.extension) }} />
+                    </pre>
+                </div>
+                <div className="w-1/3 min-w-[300px] max-w-sm border-l border-gray-700 p-4 flex flex-col bg-gray-800/50">
+                    <h4 className="text-lg font-semibold mb-2 flex items-center"><SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" /> AI Code Generation</h4>
+                    <p className="text-sm text-gray-400 mb-4">Describe the changes you want to make to this file. The Frontend Coder agent will generate the new code.</p>
+                    <textarea 
+                        value={prompt}
+                        onChange={e => setPrompt(e.target.value)}
+                        placeholder={`e.g., "Change the h1 text to 'Hello World' and add a red border."`}
+                        className="w-full flex-grow bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar"
+                    />
+                     <button
+                        onClick={handleGenerate}
+                        disabled={isLoading}
+                        className="mt-3 flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
+                    >
+                        <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
+                        {isLoading ? 'Generating...' : 'Generate Changes'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, requirements, activeFile, onCodeChange }: { conversation: Message[], addLog: (source: string, message: string) => void, onSendMessage: (text: string) => Promise<void>, onProcessDocument: (docText: string) => Promise<void>, requirements: Requirement[], activeFile: FileNode | null, onCodeChange: (file: FileNode, prompt: string) => Promise<void> }) => {
     const [activeView, setActiveView] = useState('chat');
+
+    useEffect(() => {
+        if (activeFile) {
+            setActiveView('editor');
+        }
+    }, [activeFile]);
+    
+    const handleCodeChangeForFile = (prompt: string) => {
+        if (activeFile) {
+           return onCodeChange(activeFile, prompt);
+        }
+        return Promise.resolve();
+    }
 
     return (
         <main className="flex-1 bg-gray-900 flex flex-col">
             <div className="flex border-b border-gray-700">
                 <button onClick={() => setActiveView('chat')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'chat' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>Chat</button>
+                 {activeFile && (
+                    <button onClick={() => setActiveView('editor')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'editor' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><CodeBracketIcon />Editor</button>
+                )}
                 <button onClick={() => setActiveView('requirements')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'requirements' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><DocumentTextIcon />Requirements</button>
                 <button onClick={() => setActiveView('canvas')} className={`py-3 px-5 text-sm font-semibold transition-colors ${activeView === 'canvas' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>Canvas</button>
                 <button onClick={() => setActiveView('review')} className={`py-3 px-5 text-sm font-semibold relative transition-colors ${activeView === 'review' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>
@@ -373,6 +479,7 @@ const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, r
                 {activeView === 'requirements' && <RequirementsView onProcess={onProcessDocument} requirements={requirements} />}
                 {activeView === 'canvas' && <CanvasView />}
                 {activeView === 'review' && <CodeReviewView addLog={addLog} />}
+                {activeView === 'editor' && activeFile && <CodeEditorView file={activeFile} onCodeChange={handleCodeChangeForFile} />}
             </div>
         </main>
     );
@@ -443,12 +550,63 @@ export default function App() {
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(initialTerminalLogs);
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [fileStructure, setFileStructure] = useState<FileNode[]>(initialFileStructure);
+  const [activeFile, setActiveFile] = useState<FileNode | null>(null);
 
   const addLog = useCallback((source: string, message: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     const newLog: TerminalLog = { time, source, message };
     setTerminalLogs(prev => [...prev, newLog]);
   }, []);
+  
+  const handleFileSelect = useCallback((file: FileNode) => {
+    setActiveFile(file);
+    addLog('Orchestrator', `Opened ${file.path} in editor.`);
+  }, [addLog]);
+
+  const updateFileContent = (files: FileNode[], path: string, newContent: string): FileNode[] => {
+      return files.map(file => {
+          if (file.path === path) {
+              return { ...file, content: newContent };
+          }
+          if (file.children) {
+              return { ...file, children: updateFileContent(file.children, path, newContent) };
+          }
+          return file;
+      });
+  };
+
+  const handleCodeChange = useCallback(async (file: FileNode, changeRequest: string) => {
+      setAgents(prev => prev.map(a => a.name === 'Frontend Coder' ? {...a, status: 'Active', task: `Updating ${file.name}...`} : a));
+      addLog('Frontend Coder', `Received request to modify ${file.path}: "${changeRequest}"`);
+
+      try {
+          const prompt = `You are an expert programmer. A user wants to modify the file "${file.path}".
+User's request: "${changeRequest}"
+
+Current content of ${file.path}:
+\`\`\`${file.extension}
+${file.content}
+\`\`\`
+
+Provide the full, updated content for the file ${file.path}. Your response should ONLY be the raw source code for the file, with no explanations, comments, or markdown formatting like \`\`\`${file.extension} ... \`\`\`.`;
+
+          const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+          const newContent = response.text.trim();
+          
+          setFileStructure(prev => updateFileContent(prev, file.path, newContent));
+          setActiveFile(prev => prev ? { ...prev, content: newContent } : null);
+          addLog('Frontend Coder', `Successfully updated ${file.path}.`);
+
+      } catch (error) {
+          console.error("Error modifying code:", error);
+          const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+          addLog('Error', `Failed to modify ${file.path}: ${errorMessage}`);
+      } finally {
+          setAgents(prev => prev.map(a => a.name === 'Frontend Coder' ? {...a, status: 'Idle', task: undefined} : a));
+      }
+
+  }, [addLog]);
 
   const handleProcessDocument = useCallback(async (docText: string) => {
     if (!docText.trim()) return;
@@ -541,13 +699,15 @@ ${docText}
         @keyframes dotFlashing { 0% { background-color: #6b7280; } 50%, 100% { background-color: #d1d5db; } }
       `}</style>
       <div className="flex h-screen w-full bg-gray-900 font-sans text-sm">
-        <LeftPanel agents={agents} />
+        <LeftPanel agents={agents} files={fileStructure} onFileSelect={handleFileSelect} activeFile={activeFile} />
         <CenterPanel
             conversation={conversation}
             addLog={addLog}
             onSendMessage={handleSendMessage}
             onProcessDocument={handleProcessDocument}
             requirements={requirements}
+            activeFile={activeFile}
+            onCodeChange={handleCodeChange}
         />
         <RightPanel conversation={conversation} logs={terminalLogs} addLog={addLog} />
       </div>
