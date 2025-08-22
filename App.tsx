@@ -87,10 +87,7 @@ const SparklesIcon = ({ className = "w-5 h-5 mr-3 text-yellow-400" }) => <svg xm
 // --- MOCK DATA ---
 const initialFileStructure: FileNode[] = [
   { name: 'src', type: 'folder', children: [
-      { name: 'components', type: 'folder', children: [
-          { name: 'RecipeCard.tsx', type: 'file', extension: 'tsx' },
-          { name: 'RatingStars.tsx', type: 'file', extension: 'tsx' },
-      ]},
+      { name: 'components', type: 'folder', children: []},
       { name: 'App.tsx', type: 'file', extension: 'tsx' },
   ]},
   { name: 'public', type: 'folder', children: [
@@ -100,38 +97,27 @@ const initialFileStructure: FileNode[] = [
 ];
 const initialAgents: Agent[] = [
   { name: 'Requirements Analyst', status: 'Idle' },
-  { name: 'UI/UX Architect', status: 'Active', task: 'Designing recipe detail view...' },
-  { name: 'Frontend Coder', status: 'Active', task: 'Implementing login form...' },
+  { name: 'UI/UX Architect', status: 'Idle' },
+  { name: 'Frontend Coder', status: 'Idle' },
   { name: 'Backend Coder', status: 'Idle' },
   { name: 'QA & Security Agent', status: 'Idle' },
   { name: 'DevOps & Deployment Agent', status: 'Idle' },
 ];
-const initialConversation: Message[] = [
-    { from: 'user', text: 'Build me a recipe tracking app with the ability to rate and save favorites.' },
-    { from: 'ai', text: 'Understood. I will begin by designing a database schema for recipes and users. Then, our UI/UX agent will create wireframes for the main recipe feed and detail pages. Do you have any initial design preferences?' },
-];
+const initialConversation: Message[] = [];
 const initialPullRequest: PullRequest = {
-  id: 42, title: 'feat(auth): Implement user login component', author: 'Frontend Coder Agent', branch: 'feature/login-page',
-  changes: `+ import React from 'react';
-+
-+ const LoginButton = () => (
-+   <button className="bg-blue-500 text-white px-4 py-2 rounded-lg">
-+     Login
-+   </button>
-+ );
-+
-+ export default LoginButton;
-- // old code removed`,
-  tests: { passed: 18, failed: 0, coverage: '92%' }
+  id: 1, title: 'feat: Initial project structure', author: 'DevOps & Deployment Agent', branch: 'main',
+  changes: `+ {
++   "name": "new-project",
++   "version": "1.0.0"
++ }`,
+  tests: { passed: 0, failed: 0, coverage: 'N/A' }
 };
 const initialTerminalLogs: TerminalLog[] = [
-  { time: '13:37:01', source: 'Backend Coder', message: 'CREATE TABLE "users" (id uuid primary key, ...)' },
-  { time: '13:37:02', source: 'Supabase', message: 'SUCCESS: table "users" created.' },
-  { time: '13:37:05', source: 'Frontend Coder', message: 'git checkout -b feature/login-page' },
-  { time: '13:37:10', source: 'Frontend Coder', message: 'WRITE src/components/Login.tsx' },
-  { time: '13:37:15', source: 'QA Agent', message: 'RUNNING tests for feature/login-page...' },
-  { time: '13:37:18', source: 'QA Agent', message: 'SUCCESS: 18/18 tests passed (Coverage: 92%)' },
-  { time: '13:37:20', source: 'Orchestrator', message: 'Pull Request #42 created. Awaiting user review.' },
+  { time: '13:37:01', source: 'Orchestrator', message: 'Initializing project workspace...' },
+  { time: '13:37:02', source: 'DevOps Agent', message: 'Cloning repository...' },
+  { time: '13:37:05', source: 'DevOps Agent', message: 'Installing dependencies...' },
+  { time: '13:37:10', source: 'Orchestrator', message: 'Project initialized. AI agents are standing by.' },
+  { time: '13:37:11', source: 'Orchestrator', message: 'Awaiting user instructions in the chat.' },
 ];
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
@@ -239,7 +225,7 @@ const CanvasView = () => (
 );
 
 const RequirementsView = ({ onProcess, requirements }: { onProcess: (docText: string) => Promise<void>, requirements: Requirement[] }) => {
-    const [documentText, setDocumentText] = useState('Build a recipe tracking app. Users can create accounts, log in, browse recipes, and save favorites. Each recipe needs ingredients, instructions, and a 1-5 star rating system.');
+    const [documentText, setDocumentText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async () => {
@@ -393,7 +379,7 @@ const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, r
 }
 
 const RightPanel = ({ conversation, logs, addLog }: { conversation: Message[], logs: TerminalLog[], addLog: (source: string, message: string) => void }) => {
-    const [previewContent, setPreviewContent] = useState('<p class="text-gray-500 p-8 text-center">Click "Generate" to see the app live.</p>');
+    const [previewContent, setPreviewContent] = useState('<div class="flex h-full items-center justify-center"><p class="text-gray-500">Live preview will appear here.</p></div>');
     const [isLoading, setIsLoading] = useState(false);
     const terminalRef = useRef<HTMLDivElement>(null);
 
@@ -432,7 +418,7 @@ const RightPanel = ({ conversation, logs, addLog }: { conversation: Message[], l
                     </button>
                 </div>
                 <div className="flex-grow bg-white rounded-lg shadow-inner overflow-hidden">
-                    <iframe srcDoc={`<script src="https://cdn.tailwindcss.com"></script><body class="bg-gray-100">${previewContent}</body>`} title="Live App Preview" className="w-full h-full border-0" sandbox="allow-scripts" />
+                    <iframe srcDoc={`<style>html, body { height: 100%; margin: 0; }</style><script src="https://cdn.tailwindcss.com"></script><body class="bg-gray-100">${previewContent}</body>`} title="Live App Preview" className="w-full h-full border-0" sandbox="allow-scripts" />
                 </div>
             </div>
             <div className="h-1/2 p-4 flex flex-col border-t border-gray-700">
