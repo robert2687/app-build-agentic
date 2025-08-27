@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
@@ -263,7 +262,7 @@ const initialAgents: Agent[] = [
 // --- ICONS ---
 const ExplorerIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>;
 const SourceControlIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>;
-const AgentsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.124-1.282-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.124-1.282.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>;
+const RightPanelIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21H3V3h18v18zM15 3v18" /></svg>;
 const CloseIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 const GitBranchIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4-4a3 3 0 013-3h2a3 3 0 013 3m-3-3V5a3 3 0 013-3h2" /></svg>;
 const FetchIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 mr-1.5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>;
@@ -296,26 +295,47 @@ const FileIcon = ({ extension }: { extension?: string }) => {
     }
 };
 
+const GlobalStyles = () => (
+    <style>{`
+        .diff-added { background-color: rgba(60, 120, 60, 0.3) !important; }
+        .diff-modified { background-color: rgba(60, 60, 120, 0.3) !important; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1E1E1E; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4A5568; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #718096; }
+    `}</style>
+);
+
 // --- VSCODE-LIKE COMPONENTS ---
 
-const ActivityBar: React.FC<{ activeView: string; setActiveView: (view: string) => void }> = ({ activeView, setActiveView }) => {
+const ActivityBar: React.FC<{ activeView: string; setActiveView: (view: string) => void; onToggleRightSidebar: () => void; isRightSidebarOpen: boolean; }> = ({ activeView, setActiveView, onToggleRightSidebar, isRightSidebarOpen }) => {
     const views = [
         { id: 'explorer', icon: <ExplorerIcon />, label: 'Explorer' },
         { id: 'source-control', icon: <SourceControlIcon />, label: 'Source Control' },
-        { id: 'agents', icon: <AgentsIcon />, label: 'Agents' },
     ];
     return (
-        <div className="w-12 bg-gray-800 flex flex-col items-center py-2 space-y-2 shrink-0 border-r border-gray-700">
-            {views.map(view => (
-                <button
-                    key={view.id}
-                    onClick={() => setActiveView(view.id)}
-                    className={`p-2 rounded-md transition-colors ${activeView === view.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
-                    title={view.label}
+        <div className="w-12 bg-gray-800 flex flex-col justify-between items-center py-2 shrink-0 border-r border-gray-700">
+            <div className="space-y-2">
+                {views.map(view => (
+                    <button
+                        key={view.id}
+                        onClick={() => setActiveView(view.id)}
+                        className={`p-2 rounded-md transition-colors ${activeView === view.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
+                        title={view.label}
+                    >
+                        {view.icon}
+                    </button>
+                ))}
+            </div>
+            <div>
+                 <button
+                    onClick={onToggleRightSidebar}
+                    className={`p-2 rounded-md transition-colors ${isRightSidebarOpen ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
+                    title="Toggle Side Panel"
                 >
-                    {view.icon}
+                    <RightPanelIcon />
                 </button>
-            ))}
+            </div>
         </div>
     );
 };
@@ -434,38 +454,10 @@ const TaskStateIcon: React.FC<{ state: AgentTaskState }> = ({ state }) => {
     }
 }
 
-const AgentPanel: React.FC<{ agents: Agent[] }> = ({ agents }) => (
-    <div className="h-full p-2 text-sm overflow-y-auto">
-        <CollapsibleSection title="Team Status">
-            <div className="space-y-3 p-1">
-                {agents.map(agent => (
-                    <div key={agent.name} className="bg-gray-700/50 p-3 rounded-md">
-                        <div className="flex justify-between items-center mb-2">
-                            <span className="font-semibold text-white">{agent.name}</span>
-                            <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${agent.status === 'Working' ? 'bg-blue-500 text-blue-900' : 'bg-gray-500 text-gray-900'}`}>{agent.status}</span>
-                        </div>
-                        <div className="space-y-1.5 pl-1 border-l-2 border-gray-600">
-                            {agent.tasks.length === 0 && <p className="text-xs text-gray-500 italic ml-2">No tasks assigned.</p>}
-                            {agent.tasks.map(task => (
-                                <div key={task.id} className="flex items-start ml-2">
-                                    <div className="mt-0.5 mr-2 shrink-0"><TaskStateIcon state={task.state} /></div>
-                                    <p className={`text-xs ${task.state === 'Completed' ? 'text-gray-500 line-through' : 'text-gray-300'}`}>{task.description}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </CollapsibleSection>
-    </div>
-);
-
-
 const Sidebar: React.FC<{ activeView: string; files: FileNode[]; activeFile: string | null; onFileSelect: (path: string) => void; scmData: any }> = ({ activeView, files, activeFile, onFileSelect, scmData }) => {
     const viewMap: { [key:string]: { title: string; component: React.ReactNode } } = {
         'explorer': { title: 'Explorer', component: <FileExplorer files={files} activeFile={activeFile} onSelect={onFileSelect} /> },
         'source-control': { title: 'Source Control', component: <SourceControlPanel {...scmData} /> },
-        'agents': { title: 'Agents', component: <AgentPanel agents={scmData.agents} /> }
     };
 
     const currentView = viewMap[activeView] || viewMap['explorer'];
@@ -478,7 +470,9 @@ const Sidebar: React.FC<{ activeView: string; files: FileNode[]; activeFile: str
     );
 };
 
-const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, content: string) => void; originalFileContents: Map<string, string> }> = ({ file, onContentChange, originalFileContents }) => {
+// FIX: Destructure props inside the component body to avoid potential issues with `forwardRef` resolution.
+const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, content: string) => void; originalFileContents: Map<string, string> }> = (props) => {
+    const { file, onContentChange, originalFileContents } = props;
     const editorRef = useRef<HTMLDivElement>(null);
     const monacoInstanceRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
     const decorationsRef = useRef<string[]>([]);
@@ -498,7 +492,7 @@ const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, 
                 }
             });
         }
-    }, []);
+    }, [file, onContentChange]);
 
     useEffect(() => {
         if (file && monacoInstanceRef.current) {
@@ -524,7 +518,7 @@ const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, 
             decorationsRef.current = monacoInstance.deltaDecorations(decorationsRef.current, []);
             return;
         }
-
+        
         const diffs = diffLines(originalContent, modifiedContent || '');
         const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
         let lineNumber = 1;
@@ -537,36 +531,12 @@ const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, 
                     options: { isWholeLine: true, className: 'diff-added' }
                 });
             } else if (part.removed) {
-                // Not showing removed lines directly, but could add gutter indicators
-            } else { // Unchanged
-                 // Could check for intra-line changes if needed
+                // Not showing removed lines directly, could add gutter indicators
             }
             if (!part.removed) {
                 lineNumber += lineCount;
             }
         });
-
-        // A simpler check for modification if diffLines is too complex
-        const originalLines = originalContent.split('\n');
-        const modifiedLines = (modifiedContent || '').split('\n');
-        const maxLines = Math.max(originalLines.length, modifiedLines.length);
-
-        for (let i = 0; i < maxLines; i++) {
-            if (originalLines[i] !== modifiedLines[i]) {
-                if (i < modifiedLines.length && i < originalLines.length) { // Modified
-                     newDecorations.push({
-                        range: new monaco.Range(i + 1, 1, i + 1, 1),
-                        options: { isWholeLine: true, className: 'diff-modified' }
-                    });
-                } else if (i < modifiedLines.length) { // Added
-                    newDecorations.push({
-                        range: new monaco.Range(i + 1, 1, i + 1, 1),
-                        options: { isWholeLine: true, className: 'diff-added' }
-                    });
-                }
-            }
-        }
-
 
         decorationsRef.current = monacoInstance.deltaDecorations(decorationsRef.current, newDecorations);
 
@@ -574,10 +544,6 @@ const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, 
 
     return (
         <div className="h-full w-full bg-[#1E1E1E]">
-            <style>{`
-                .diff-added { background-color: rgba(60, 120, 60, 0.3) !important; }
-                .diff-modified { background-color: rgba(60, 60, 120, 0.3) !important; }
-            `}</style>
             {file ? <div ref={editorRef} className="h-full w-full"></div> : <div className="flex items-center justify-center h-full text-gray-500">Select a file to begin editing.</div>}
         </div>
     );
@@ -657,14 +623,14 @@ const Terminal: React.FC<{ logs: TerminalLog[], onRunCommand: (cmd: string) => v
     );
 };
 
-
-const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; onSelectFile: (path: string) => void; onCloseFile: (path: string) => void; onContentChange: (path: string, content: string) => void; files: FileNode[], originalFileContents: Map<string, string> }> = ({ openFiles, activeFile, onSelectFile, onCloseFile, onContentChange, files, originalFileContents }) => {
-    const [view, setView] = useState<'editor' | 'preview'>('editor');
+// FIX: Destructure props inside the component body to avoid potential issues with `forwardRef` resolution.
+const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; onSelectFile: (path: string) => void; onCloseFile: (path: string) => void; onContentChange: (path: string, content: string) => void; originalFileContents: Map<string, string> }> = (props) => {
+    const { openFiles, activeFile, onSelectFile, onCloseFile, onContentChange, originalFileContents } = props;
     const activeFileNode = useMemo(() => openFiles.find(f => f.path === activeFile) || null, [openFiles, activeFile]);
 
     return (
         <div className="flex-grow flex flex-col bg-gray-800 overflow-hidden">
-            <div className="flex items-center justify-between bg-gray-800 border-b border-gray-700 shrink-0">
+            <div className="flex items-center bg-gray-800 border-b border-gray-700 shrink-0">
                 <div className="flex items-center overflow-x-auto">
                     {openFiles.map(file => (
                         <div key={file.path} className={`flex items-center p-2 text-sm border-r border-gray-700 cursor-pointer whitespace-nowrap ${activeFile === file.path ? 'bg-[#1E1E1E] text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>
@@ -673,13 +639,9 @@ const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; 
                         </div>
                     ))}
                 </div>
-                <div className="flex p-1">
-                    <button onClick={() => setView('editor')} className={`px-3 py-1 text-sm rounded-md ${view === 'editor' ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>Editor</button>
-                    <button onClick={() => setView('preview')} className={`px-3 py-1 text-sm rounded-md ${view === 'preview' ? 'bg-gray-700' : 'hover:bg-gray-700/50'}`}>Preview</button>
-                </div>
             </div>
             <div className="flex-grow relative">
-                {view === 'editor' ? <Editor file={activeFileNode} onContentChange={onContentChange} originalFileContents={originalFileContents} /> : <PreviewPanel files={files} />}
+                <Editor file={activeFileNode} onContentChange={onContentChange} originalFileContents={originalFileContents} />
             </div>
         </div>
     );
@@ -733,6 +695,53 @@ const BottomPanel: React.FC<{ logs: TerminalLog[], problems: QAProblem[], onRunC
     );
 };
 
+const AgentStatusPanel: React.FC<{ agents: Agent[] }> = ({ agents }) => (
+    <div className="h-full p-3 text-sm overflow-y-auto custom-scrollbar">
+        {agents.map(agent => (
+            <div key={agent.name} className="bg-gray-900/50 p-3 rounded-lg mb-4">
+                <div className="flex justify-between items-center mb-3">
+                    <span className="font-bold text-lg text-white">{agent.name}</span>
+                    <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${agent.status === 'Working' ? 'bg-blue-500 text-blue-900' : 'bg-gray-500 text-gray-900'}`}>{agent.status}</span>
+                </div>
+                <div className="space-y-2 pl-2 border-l-2 border-gray-700">
+                    {agent.tasks.length === 0 
+                        ? <p className="text-xs text-gray-500 italic ml-2">No tasks assigned.</p> 
+                        : agent.tasks.map(task => (
+                        <div key={task.id} className="flex flex-col ml-2 p-2 bg-gray-800/60 rounded-md">
+                            <div className="flex items-center mb-1">
+                                <div className="shrink-0"><TaskStateIcon state={task.state} /></div>
+                                <p className={`text-xs ml-2 font-semibold ${task.state === 'Completed' ? 'text-gray-500 line-through' : 'text-gray-300'}`}>{task.description}</p>
+                            </div>
+                            <span className="text-xs text-cyan-400 pl-6 break-all">{task.filePath}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        ))}
+        <div className="mt-4 p-4 border border-dashed border-gray-700 rounded-lg text-center text-gray-500">
+            <h3 className="font-semibold text-gray-400 mb-2">Task Dependency Graph</h3>
+            <p className="text-xs">Visualization of task dependencies will be shown here.</p>
+        </div>
+    </div>
+);
+
+const RightSidebar: React.FC<{ files: FileNode[], agents: Agent[] }> = ({ files, agents }) => {
+    const [activeTab, setActiveTab] = useState<'preview' | 'agents'>('preview');
+
+    return (
+        <div className="w-[450px] bg-gray-800 flex flex-col shrink-0 border-l border-gray-700">
+            <div className="flex bg-gray-900 shrink-0">
+                <button onClick={() => setActiveTab('preview')} className={`flex-1 px-4 py-1.5 text-sm uppercase tracking-wider ${activeTab === 'preview' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-800/50'}`}>Preview</button>
+                <button onClick={() => setActiveTab('agents')} className={`flex-1 px-4 py-1.5 text-sm uppercase tracking-wider ${activeTab === 'agents' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-800/50'}`}>Agents</button>
+            </div>
+            <div className="flex-grow overflow-hidden">
+                {activeTab === 'preview' && <PreviewPanel files={files} />}
+                {activeTab === 'agents' && <AgentStatusPanel agents={agents} />}
+            </div>
+        </div>
+    );
+};
+
 
 const StatusBar: React.FC<{ webContainerStatus: string }> = ({ webContainerStatus }) => (
     <div className="h-6 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-4 text-sm text-gray-300 shrink-0">
@@ -757,10 +766,11 @@ const App: React.FC = () => {
     const [qaProblems, setQaProblems] = useState<QAProblem[]>([]);
 
     // UI State
-    const [activeView, setActiveView] = useState('explorer'); // explorer, source-control, agents
+    const [activeView, setActiveView] = useState('explorer'); // explorer, source-control
     const [openFiles, setOpenFiles] = useState<string[]>(['/src/App.tsx']);
     const [activeFile, setActiveFile] = useState<string | null>('/src/App.tsx');
     const [isWorking, setIsWorking] = useState(false);
+    const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
 
     // Git State
     const [originalFileContents, setOriginalFileContents] = useState(new Map<string, string>());
@@ -961,6 +971,10 @@ const App: React.FC = () => {
         }
     };
     
+    const handleToggleRightSidebar = () => {
+        setIsRightSidebarOpen(prev => !prev);
+    }
+    
     // --- WebContainer Command Runner ---
     const runTerminalCommand = useCallback(async (command: string) => {
         if (!webContainerInstance.current || webContainerStatus !== 'Ready') {
@@ -1020,7 +1034,7 @@ const App: React.FC = () => {
             // Update agent state for UI with all tasks pending
             setAgents(prev => {
                 const newAgents = prev.map(agent => ({ ...agent, tasks: [] })); // Clear old tasks
-                tasksWithIds.forEach((task) => {
+                tasksWithIds.forEach((task: any) => {
                     const agent = newAgents.find(a => a.name === task.agent);
                     if (agent) {
                         agent.tasks.push({
@@ -1098,19 +1112,21 @@ const App: React.FC = () => {
     const handleFetch = () => { addTerminalLog('git', 'Fetching from remote...'); setTimeout(() => { addTerminalLog('git', 'Fetch complete. Already up-to-date.'); }, 1000); };
     const handlePull = () => { addTerminalLog('git', 'Pulling from remote...'); };
 
-    const scmData = { modifiedFiles, untrackedFiles, stagedFiles, commits, commitMessage, onCommitMessageChange: setCommitMessage, onStage: handleStage, onUnstage: handleUnstage, onStageAll: handleStageAll, onCommit: handleCommit, onCommitAll: handleCommitAll, onFetch: handleFetch, onPull: handlePull, pullableCommits, agents };
+    const scmData = { modifiedFiles, untrackedFiles, stagedFiles, commits, commitMessage, onCommitMessageChange: setCommitMessage, onStage: handleStage, onUnstage: handleUnstage, onStageAll: handleStageAll, onCommit: handleCommit, onCommitAll: handleCommitAll, onFetch: handleFetch, onPull: handlePull, pullableCommits };
     const openFileNodes = useMemo(() => openFiles.map(path => findFile(files, path)).filter((f): f is FileNode => f !== null), [openFiles, files, findFile]);
 
     return (
         <div className="h-screen w-screen bg-gray-900 text-white flex flex-col font-sans text-sm">
+            <GlobalStyles />
             <main className="flex-grow flex overflow-hidden">
-                <ActivityBar activeView={activeView} setActiveView={setActiveView} />
+                <ActivityBar activeView={activeView} setActiveView={setActiveView} onToggleRightSidebar={handleToggleRightSidebar} isRightSidebarOpen={isRightSidebarOpen} />
                 <Sidebar activeView={activeView} files={files} activeFile={activeFile} onFileSelect={handleOpenFile} scmData={scmData} />
                 <div className="flex-grow flex flex-col overflow-hidden bg-[#1E1E1E]">
-                    <EditorPanel openFiles={openFileNodes} activeFile={activeFile} onSelectFile={setActiveFile} onCloseFile={handleCloseFile} onContentChange={updateFileContent} files={files} originalFileContents={originalFileContents} />
+                    <EditorPanel openFiles={openFileNodes} activeFile={activeFile} onSelectFile={setActiveFile} onCloseFile={handleCloseFile} onContentChange={updateFileContent} originalFileContents={originalFileContents} />
                     <PromptBar onSubmit={handlePromptSubmit} isWorking={isWorking} />
                     <BottomPanel logs={terminalLogs} problems={qaProblems} onRunCommand={runTerminalCommand}/>
                 </div>
+                {isRightSidebarOpen && <RightSidebar files={files} agents={agents} />}
             </main>
             <StatusBar webContainerStatus={webContainerStatus} />
         </div>
