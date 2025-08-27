@@ -1,0 +1,40 @@
+/* File: src/App.css */
+.app-container {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e; /* Dark background similar to VS Code */
+  color: #d4d4d4;
+}
+
+.panel-content {
+  /* For visualization only, so we can see the panel borders */
+  border: 1px dashed #444;
+  height: calc(100% - 2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.resize-handle {
+  /* The basis for the visibility and functionality of the "handle" */
+  background-color: #444;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+/* Highlighting the "handle" on hover */
+.resize-handle:hover {
+  background-color: #007acc;
+}
+
+/* Styles for vertical and horizontal handles */
+.resize-handle[data-orientation="vertical"] {
+  width: 2px;
+}
+
+.resize-handle[data-orientation="horizontal"] {
+  height: 2px;
+}
