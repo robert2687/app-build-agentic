@@ -4,6 +4,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from "react-resizable-panels";
+import Editor from "@monaco-editor/react";
 import "./App.css";
 
 function App() {
@@ -21,9 +22,19 @@ function App() {
         {/* RIGHT PANEL: Contains the editor and terminal */}
         <Panel minSize={30}>
           <PanelGroup direction="vertical">
-            {/* TOP PANEL: Code Editor */}
+            {/* TOP PANEL: Code editor */}
             <Panel defaultSize={75} minSize={25}>
-              <div className="panel-content">Code Editor</div>
+ <Editor
+ height="100%"
+ defaultLanguage="typescript"
+ theme="vs-dark"
+ defaultValue={exampleCode}
+ options={{
+                  minimap: { enabled: true },
+                  fontSize: 14,
+                  wordWrap: "on",
+ }}
+ />
             </Panel>
 
             <PanelResizeHandle className="resize-handle" />
@@ -40,3 +51,13 @@ function App() {
 }
 
 export default App;
+
+// Example code that will be displayed in the editor on startup
+const exampleCode = `import React from 'react';
+
+function Welcome() {
+  return <h1>Hello, World!</h1>;
+}
+
+export default Welcome;
+`;

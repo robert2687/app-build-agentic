@@ -6,10 +6,12 @@
   flex-direction: column;
   background-color: #1e1e1e; /* Dark background similar to VS Code */
   color: #d4d4d4;
+
 }
 
+/* This is for panels where we only have placeholder text */
 .panel-content {
-  /* For visualization only, so we can see the panel borders */
+
   border: 1px dashed #444;
   height: calc(100% - 2px);
   display: flex;
@@ -18,9 +20,18 @@
   box-sizing: border-box;
 }
 
+/* We don't need any special styles for the editor panel,
+   because the Editor component manages its own content.
+   We added `className="editor-panel"` directly to it in JSX for possible future modifications. */
+.editor-panel {
+  /* Monaco will take 100% of the height and width of this panel */
+  background-color: #1e1e1e; /* Editor background color */
+}
+
 .resize-handle {
-  /* The basis for the visibility and functionality of the "handle" */
+
   background-color: #444;
+
   position: relative;
   transition: background-color 0.2s;
 }
