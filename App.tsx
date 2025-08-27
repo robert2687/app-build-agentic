@@ -1,6 +1,10 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
+import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
+import * as pluginBabel from "https://esm.sh/prettier@3.3.2/plugins/babel";
+import * as pluginEstree from "https://esm.sh/prettier@3.3.2/plugins/estree";
+import * as pluginHtml from "https://esm.sh/prettier@3.3.2/plugins/html";
 
 // --- ERROR BOUNDARY ---
 interface ErrorBoundaryProps {
@@ -275,18 +279,24 @@ const applySyntaxHighlighting = (code: string, extension?: string) => {
             .replace(/(<)(\/?\w+)(.*?)(\/?>)/g, '$1<span class="text-sky-400">$2</span>$3$4');
     } else if (currentExtension === 'json') {
          highlighted = highlighted
-            .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, (match) => {
-                if (/:$/.test(match)) {
-                    return `<span class="text-sky-400">${match}</span>`;
-                }
+            .replace(/"([^"\\]|\\.)*"/g, (match, group) => {
+                // This regex is a simplification, but good enough for highlighting
                 return `<span class="text-green-400">${match}</span>`;
             })
-            .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>');
+            .replace(/(?<=<span class="text-green-400">"[^"]+"<\/span>\s*):/g, (match) => {
+                // This is a tricky part. We are trying to color the key differently.
+                // A better approach would be a proper tokenizer.
+                // For now, let's just color all strings green.
+                return match;
+            })
+            .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>')
+            .replace(/\b-?\d+(\.\d+)?([eE][+-]?\d+)?\b/g, '<span class="text-orange-400">$&</span>'); // For numbers
     } else if (currentExtension === 'html') {
          highlighted = highlighted
-            .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>')
-            .replace(/(&lt;)(\/?\w+)/g, '$1<span class="text-sky-400">$2</span>')
-            .replace(/(\w+)=(".*?"|'.*?')/g, '<span class="text-purple-400">$1</span>=<span class="text-green-400">$2</span>');
+            .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>') // Comments
+            .replace(/(&lt;\/?)([\w-]+)/g, '$1<span class="text-sky-400">$2</span>') // Tags
+            .replace(/([\w-]+)=/g, '<span class="text-purple-400">$1</span>=') // Attributes
+            .replace(/(".*?"|'.*?')/g, '<span class="text-green-400">$1</span>'); // Attribute values
     }
 
     return highlighted;
@@ -1093,35 +1103,26 @@ const App = () => {
         }
     }, [activeFile, updateFileContent]);
     
-    const formatCode = useCallback(() => {
+    const formatCode = useCallback(async () => {
         if (!activeFile || typeof activeFile.content !== 'string') return;
-        
-        // @ts-ignore
-        const prettier = window.prettier;
-        // @ts-ignore
-        const prettierPlugins = window.prettierPlugins;
-        
-        if (!prettier || !prettierPlugins || !prettierPlugins.babel || !prettierPlugins.html || !prettierPlugins.estree) {
-            addLog('Error', 'Prettier library or plugins not found.');
-            console.error('Prettier not available on window object');
-            return;
-        }
-        
+
         let parser: string;
         switch (activeFile.extension) {
             case 'html': parser = 'html'; break;
             case 'json': parser = 'json'; break;
-            case 'tsx': case 'ts': case 'js':
+            case 'tsx':
+            case 'ts':
+            case 'js':
                 parser = 'babel'; break;
             default:
                 addLog('Editor', `Formatting not supported for .${activeFile.extension} files.`);
                 return;
         }
-        
+
         try {
-            const formatted = prettier.format(activeFile.content, {
+            const formatted = await prettier.format(activeFile.content, {
                 parser: parser,
-                plugins: [prettierPlugins.babel, prettierPlugins.html, prettierPlugins.estree],
+                plugins: [pluginBabel, pluginHtml, pluginEstree],
                 semi: true,
                 singleQuote: true,
                 jsxSingleQuote: false,
@@ -1161,7 +1162,7 @@ const App = () => {
                                     type: { type: Type.STRING, description: "Action type: 'WAIT', 'CREATE_FILE', 'UPDATE_FILE', or 'SEND_MESSAGE'." },
                                     duration: { type: Type.INTEGER, description: "Wait duration in ms (for WAIT action)." },
                                     path: { type: Type.STRING, description: "File path (for file actions)." },
-                                    content: { type: Type.STRING, description: "File content (for file actions)." },
+                                    content: { type: Type.STRING, description: "File content (for file actions). Must be a valid, escaped JSON string." },
                                     message: { type: Type.STRING, description: "The message content (for SEND_MESSAGE action)." }
                                 }
                             }
@@ -1174,8 +1175,9 @@ const App = () => {
         const prompt = `You are an AI project orchestrator. A user has requested: "${text}".
         Generate a JSON object representing a development plan. The plan should be an array of steps.
         The agents available are: "${agentNames}".
-        The development plan should be a logical sequence. Encourage agents to communicate using the 'SEND_MESSAGE' action before writing code. For example, the UI/UX Architect can send a message to the Frontend Coder with component details.
+        The plan MUST include at least one 'SEND_MESSAGE' action for inter-agent communication before any file modifications. For example, the UI/UX Architect can send a message to the Frontend Coder with component details.
         For file content, generate plausible, simple, and complete code for the request.
+        IMPORTANT: The 'content' field for file actions MUST be a single, valid JSON string. All special characters, including newlines, backslashes, and double quotes, must be properly escaped (e.g., \\n for newlines, \\\\ for backslashes, \\" for quotes).
         For a WAIT action, use a duration between 1000 and 3000 ms.
         Respond ONLY with the JSON object that adheres to the schema.`;
 
@@ -1190,7 +1192,16 @@ const App = () => {
                 },
             });
             
-            const responseJson = JSON.parse(response.text);
+            // Defensive cleanup to remove potential markdown fences
+            let jsonText = response.text.trim();
+            if (jsonText.startsWith('```json')) {
+                jsonText = jsonText.substring(7).trim();
+            }
+            if (jsonText.endsWith('```')) {
+                jsonText = jsonText.slice(0, -3).trim();
+            }
+
+            const responseJson = JSON.parse(jsonText);
             const plan = responseJson.plan || [];
             
             addLog('Orchestrator', 'Execution plan received. Starting simulation...');
@@ -1209,7 +1220,7 @@ const App = () => {
                     createFileNode(step.action.path, step.action.content);
                 } else if (step.action?.type === 'UPDATE_FILE' && step.action.path && step.action.content) {
                     updateFileContent(step.action.path, step.action.content);
-                } else if (step.action?.type === 'SEND_MESSAGE' && step.action.message) {
+                } else if (step.action?.type === 'SEND_MESSAGE' && step.agent && step.action.message) {
                     addAgentMessage(step.agent, step.action.message);
                 }
             }
