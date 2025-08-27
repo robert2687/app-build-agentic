@@ -42,15 +42,6 @@ interface TerminalLog {
     message: string;
 }
 
-interface Requirement {
-  id: string;
-  type: 'Functional' | 'Non-Functional' | 'User Story';
-  title: string;
-  description: string;
-  acceptanceCriteria: string[];
-}
-
-
 // --- ICONS (as stateless functional components) ---
 const FolderIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -162,6 +153,45 @@ const applySyntaxHighlighting = (code: string, extension?: string) => {
 
     return highlighted;
 };
+
+const renderDesignDocument = (markdown: string) => {
+    let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    html = html
+        .replace(/^### (.*$)/gim, '<h3 class="text-xl font-bold mt-8 mb-4 text-sky-300">$1</h3>')
+        .replace(/`([^`]+)`/g, '<code class="bg-gray-700 text-cyan-300 font-mono px-1.5 py-1 rounded text-sm">$1</code>');
+    
+    const lines = html.split('\n');
+    let inList = false;
+    let result = '';
+
+    for (const line of lines) {
+        if (line.trim().startsWith('- ')) {
+            if (!inList) {
+                result += '<ul class="list-disc pl-6 space-y-2 my-4">';
+                inList = true;
+            }
+            result += `<li class="text-gray-300">${line.trim().substring(2)}</li>`;
+        } else {
+            if (inList) {
+                result += '</ul>';
+                inList = false;
+            }
+            if (line.startsWith('<h3')) {
+                result += line;
+            } else if (line.trim()) {
+                result += `<p class="mb-4 text-gray-400 leading-relaxed">${line}</p>`;
+            }
+        }
+    }
+
+    if (inList) {
+        result += '</ul>';
+    }
+
+    return result;
+};
+
 
 // --- CHILD COMPONENTS ---
 
@@ -416,7 +446,7 @@ const CanvasView = ({ addLog }: { addLog: (source: string, message: string) => v
     );
 };
 
-const RequirementsView = ({ onProcess, requirements }: { onProcess: (docText: string) => Promise<void>, requirements: Requirement[] }) => {
+const DesignView = ({ onProcess, designDocument }: { onProcess: (docText: string) => Promise<void>, designDocument: string }) => {
     const [documentText, setDocumentText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
@@ -429,14 +459,14 @@ const RequirementsView = ({ onProcess, requirements }: { onProcess: (docText: st
 
     return (
         <div className="p-4 h-full flex flex-col bg-gray-900 text-white overflow-y-auto custom-scrollbar">
-            <h3 className="text-2xl font-bold mb-2">Requirements Analysis</h3>
-            <p className="text-gray-400 mb-4">Provide detailed project documentation below. The Requirements Analyst agent will process it into a structured format.</p>
+            <h3 className="text-2xl font-bold mb-2">System Design</h3>
+            <p className="text-gray-400 mb-4">Provide high-level project documentation below. The AI System Architect will process it into a structured design document.</p>
             
             <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
                 <textarea
                     value={documentText}
                     onChange={(e) => setDocumentText(e.target.value)}
-                    placeholder="e.g., Build a recipe tracking app. Users can create accounts..."
+                    placeholder="Describe your application idea. For example: A social media platform for pet owners to share photos and schedule playdates."
                     className="w-full h-40 bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar"
                 />
                 <button
@@ -445,38 +475,24 @@ const RequirementsView = ({ onProcess, requirements }: { onProcess: (docText: st
                     className="mt-3 flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
                 >
                     <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
-                    {isLoading ? 'Processing...' : 'Process with AI'}
+                    {isLoading ? 'Generating...' : 'Generate Design Document'}
                 </button>
             </div>
 
-            <h4 className="text-xl font-semibold mb-3 mt-2">Structured Requirements</h4>
-            {isLoading && requirements.length === 0 && <div className="flex justify-center items-center h-40"><ArrowPathIcon /> <span className="ml-2">AI is analyzing the document...</span></div>}
+            <h4 className="text-xl font-semibold mb-3 mt-2">AI-Generated Design Document</h4>
+            {(isLoading && !designDocument) && <div className="flex justify-center items-center h-40"><ArrowPathIcon /> <span className="ml-2">AI is drafting the design document...</span></div>}
             
-            {!isLoading && requirements.length === 0 && (
+            {!isLoading && !designDocument && (
                 <div className="text-center py-10 border-2 border-dashed border-gray-700 rounded-lg">
-                    <p className="text-gray-500">No requirements processed yet.</p>
-                    <p className="text-gray-600 text-sm">Output from the AI will appear here.</p>
+                    <p className="text-gray-500">The generated design document will appear here.</p>
                 </div>
             )}
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
-                {requirements.map(req => (
-                    <div key={req.id} className="bg-gray-800 p-4 rounded-lg border border-gray-700 hover:border-sky-500 transition-colors flex flex-col">
-                        <div className="flex justify-between items-start mb-2">
-                             <h5 className="font-bold text-lg text-gray-100 pr-2">{req.title}</h5>
-                             <span className="text-xs bg-cyan-800 text-cyan-200 px-2 py-1 rounded-full font-medium shrink-0">{req.type}</span>
-                        </div>
-                        <p className="text-gray-300 mt-1 mb-3 text-sm flex-grow">{req.description}</p>
-                        <div>
-                            <h6 className="font-semibold mb-1 text-gray-200 text-sm">Acceptance Criteria</h6>
-                            <ul className="list-disc list-inside text-gray-400 space-y-1 text-sm">
-                                {req.acceptanceCriteria.map((c, i) => <li key={i}>{c}</li>)}
-                                {req.acceptanceCriteria.length === 0 && <li className="text-gray-500">No criteria defined.</li>}
-                            </ul>
-                        </div>
-                    </div>
-                ))}
-            </div>
+            {designDocument && (
+                <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 mt-2">
+                    <div dangerouslySetInnerHTML={{ __html: renderDesignDocument(designDocument) }} />
+                </div>
+            )}
         </div>
     );
 };
@@ -592,7 +608,7 @@ const CodeEditorView = ({ file, onCodeChange }: { file: FileNode, onCodeChange: 
     );
 };
 
-const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, requirements, activeFile, onCodeChange }: { conversation: Message[], addLog: (source: string, message: string) => void, onSendMessage: (text: string) => Promise<void>, onProcessDocument: (docText: string) => Promise<void>, requirements: Requirement[], activeFile: FileNode | null, onCodeChange: (file: FileNode, prompt: string) => Promise<void> }) => {
+const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, designDocument, activeFile, onCodeChange }: { conversation: Message[], addLog: (source: string, message: string) => void, onSendMessage: (text: string) => Promise<void>, onProcessDocument: (docText: string) => Promise<void>, designDocument: string, activeFile: FileNode | null, onCodeChange: (file: FileNode, prompt: string) => Promise<void> }) => {
     const [activeView, setActiveView] = useState('chat');
 
     useEffect(() => {
@@ -615,7 +631,7 @@ const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, r
                  {activeFile && (
                     <button onClick={() => setActiveView('editor')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'editor' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><CodeBracketIcon />Editor</button>
                 )}
-                <button onClick={() => setActiveView('requirements')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'requirements' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><DocumentTextIcon />Requirements</button>
+                <button onClick={() => setActiveView('design')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'design' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><DocumentTextIcon />Design</button>
                 <button onClick={() => setActiveView('canvas')} className={`py-3 px-5 text-sm font-semibold transition-colors ${activeView === 'canvas' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>Canvas</button>
                 <button onClick={() => setActiveView('review')} className={`py-3 px-5 text-sm font-semibold relative transition-colors ${activeView === 'review' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>
                     Code Review
@@ -624,7 +640,7 @@ const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, r
             </div>
             <div className="flex-grow overflow-y-auto">
                 {activeView === 'chat' && <ChatView conversation={conversation} onSendMessage={onSendMessage} />}
-                {activeView === 'requirements' && <RequirementsView onProcess={onProcessDocument} requirements={requirements} />}
+                {activeView === 'design' && <DesignView onProcess={onProcessDocument} designDocument={designDocument} />}
                 {activeView === 'canvas' && <CanvasView addLog={addLog}/>}
                 {activeView === 'review' && <CodeReviewView addLog={addLog} />}
                 {activeView === 'editor' && activeFile && <CodeEditorView file={activeFile} onCodeChange={handleCodeChangeForFile} />}
@@ -697,7 +713,7 @@ export default function App() {
   const [conversation, setConversation] = useState<Message[]>(initialConversation);
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(initialTerminalLogs);
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
-  const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [designDocument, setDesignDocument] = useState<string>('');
   const [fileStructure, setFileStructure] = useState<FileNode[]>(initialFileStructure);
   const [activeFile, setActiveFile] = useState<FileNode | null>(null);
 
@@ -759,31 +775,31 @@ Provide the full, updated content for the file ${file.path}. Your response shoul
   const handleProcessDocument = useCallback(async (docText: string) => {
     if (!docText.trim()) return;
 
-    setRequirements([]);
-    setAgents(prev => prev.map(a => a.name === 'Requirements Analyst' ? {...a, status: 'Active', task: 'Parsing requirements...'} : a));
-    addLog('Requirements Analyst', 'Starting analysis of provided document.');
+    setDesignDocument('');
+    setAgents(prev => prev.map(a => a.name === 'UI/UX Architect' ? {...a, status: 'Active', task: 'Drafting design document...'} : a));
+    addLog('UI/UX Architect', 'Starting analysis of provided document to create a design.');
 
     try {
-        const schema = {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING, description: 'A unique identifier for the requirement, e.g., REQ-001.' },
-                type: { type: Type.STRING, description: 'The type of requirement (e.g., "Functional", "Non-Functional", "User Story").' },
-                title: { type: Type.STRING, description: 'A short, descriptive title for the requirement.' },
-                description: { type: Type.STRING, description: 'The full description of the requirement or the user story itself (e.g., "As a user, I want to...").' },
-                acceptanceCriteria: {
-                  type: Type.ARRAY,
-                  description: 'A list of conditions that must be met for the requirement to be considered complete.',
-                  items: { type: Type.STRING }
-                },
-              },
-              required: ['id', 'type', 'title', 'description', 'acceptanceCriteria']
-            }
-        };
+        const prompt = `You are a world-class AI System Architect. Your role is to create a conceptual design based on the user's project documentation. Do not generate code.
 
-        const prompt = `You are a world-class AI Requirements Analyst. Analyze the following project documentation and break it down into a structured list of requirements. For each requirement, provide a unique ID, its type, a title, a detailed description, and a list of acceptance criteria. Output *only* the JSON array, conforming to the provided schema.
+Analyze the following documentation and generate a clear, structured design document in Markdown format. The document must have the following sections:
+
+### Functionality
+- Describe the system’s main features in a bulleted list.
+
+### Data Models
+- Define the main entities, their attributes, their relationships, and data formats.
+
+### API Design
+- Outline the key API endpoints, their purpose, request parameters, and response formats.
+
+### Technology Stack
+- Suggest appropriate tools, frameworks, and infrastructure.
+
+### User Interaction
+- Describe the flow of user actions and the main screens of the application.
+
+Ensure the content is simplified and logically organized. Your output should be only the Markdown document itself, without any surrounding text or explanations.
 
 DOCUMENTATION:
 ---
@@ -793,23 +809,17 @@ ${docText}
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: schema,
-            },
         });
         
-        const jsonText = response.text.trim();
-        const parsedRequirements = JSON.parse(jsonText);
-        setRequirements(parsedRequirements);
-        addLog('Requirements Analyst', `Successfully parsed ${parsedRequirements.length} requirements.`);
+        setDesignDocument(response.text);
+        addLog('UI/UX Architect', `Successfully generated the design document.`);
 
     } catch(error) {
         console.error("Error processing document:", error);
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        addLog('Error', `Failed to process document: ${errorMessage}`);
+        addLog('Error', `Failed to generate design: ${errorMessage}`);
     } finally {
-        setAgents(prev => prev.map(a => a.name === 'Requirements Analyst' ? {...a, status: 'Idle', task: undefined} : a));
+        setAgents(prev => prev.map(a => a.name === 'UI/UX Architect' ? {...a, status: 'Idle', task: undefined} : a));
     }
   }, [addLog]);
 
@@ -897,7 +907,7 @@ ${docText}
             addLog={addLog}
             onSendMessage={handleSendMessage}
             onProcessDocument={handleProcessDocument}
-            requirements={requirements}
+            designDocument={designDocument}
             activeFile={activeFile}
             onCodeChange={handleCodeChange}
         />
