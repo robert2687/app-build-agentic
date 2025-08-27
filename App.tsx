@@ -130,6 +130,39 @@ const initialTerminalLogs: TerminalLog[] = [
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
+// --- UTILITY FUNCTIONS ---
+const applySyntaxHighlighting = (code: string, extension?: string) => {
+    if (!extension && !code) return '';
+    let processedCode = code || '';
+    let highlighted = processedCode.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    const currentExtension = extension || 'tsx'; // Default to tsx for generated code
+    if (['tsx', 'js'].includes(currentExtension)) {
+        highlighted = highlighted
+            .replace(/\b(import|from|export|default|const|let|var|function|return|if|else|switch|case|for|while|new|async|await|of|in)\b/g, '<span class="text-purple-400">$&</span>')
+            .replace(/\b(React|useState|useEffect|useCallback|useRef|null|true|false|document|window)\b/g, '<span class="text-sky-400">$&</span>')
+            .replace(/(\'|\")(.*?)(\'|\")/g, '<span class="text-green-400">$&</span>')
+            .replace(/(\/\*[\s\S]*?\*\/)|(\/\/.*)/g, '<span class="text-gray-500">$&</span>')
+            .replace(/(<)(\/?\w+)(.*?)(\/?>)/g, '$1<span class="text-sky-400">$2</span>$3$4');
+    } else if (currentExtension === 'json') {
+         highlighted = highlighted
+            .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, (match) => {
+                if (/:$/.test(match)) {
+                    return `<span class="text-sky-400">${match}</span>`;
+                }
+                return `<span class="text-green-400">${match}</span>`;
+            })
+            .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>');
+    } else if (currentExtension === 'html') {
+         highlighted = highlighted
+            .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>')
+            .replace(/(&lt;)(\/?\w+)/g, '$1<span class="text-sky-400">$2</span>')
+            .replace(/(\w+)=(".*?"|'.*?')/g, '<span class="text-purple-400">$1</span>=<span class="text-green-400">$2</span>');
+    }
+
+    return highlighted;
+};
+
 // --- CHILD COMPONENTS ---
 
 const FileTree = ({ files, level = 0, onFileSelect, activeFile }: { files: FileNode[], level?: number, onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => (
@@ -229,13 +262,159 @@ const ChatView = ({ conversation, onSendMessage }: { conversation: Message[], on
     );
 };
 
-const CanvasView = () => (
-    <div className="flex flex-col items-center justify-center h-full bg-gray-800 border-2 border-dashed border-gray-600 rounded-lg m-4">
-        <p className="text-gray-400 text-lg">Visual Editor (Gemini Canvas)</p>
-        <p className="text-sm text-gray-500 mt-2">Draw UI sketches and collaborate with the UI/UX Architect Agent.</p>
-        <button className="mt-4 bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-md transition-colors">Open Canvas</button>
-    </div>
-);
+const CanvasView = ({ addLog }: { addLog: (source: string, message: string) => void }) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [prompt, setPrompt] = useState('Generate a React component with Tailwind CSS based on this UI mockup.');
+    const [generatedCode, setGeneratedCode] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const getCanvasContext = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        return canvas.getContext('2d');
+    }
+
+    useEffect(() => {
+        const ctx = getCanvasContext();
+        if (ctx) {
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 2;
+        }
+    }, []);
+    
+    const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        const ctx = getCanvasContext();
+        if (!ctx) return;
+        setIsDrawing(true);
+        ctx.beginPath();
+        ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+    };
+
+    const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!isDrawing) return;
+        const ctx = getCanvasContext();
+        if (!ctx) return;
+        ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+        ctx.stroke();
+    };
+
+    const stopDrawing = () => {
+        const ctx = getCanvasContext();
+        if (!ctx) return;
+        ctx.closePath();
+        setIsDrawing(false);
+    };
+
+    const handleClearCanvas = () => {
+        const ctx = getCanvasContext();
+        if (ctx) {
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            addLog('Canvas', 'Canvas cleared.');
+        }
+    };
+    
+    const handleGenerate = async () => {
+        if (!prompt.trim() || !canvasRef.current) return;
+        setIsLoading(true);
+        setGeneratedCode('');
+        addLog('UI/UX Architect', `Generating code from canvas with prompt: "${prompt}"`);
+
+        try {
+            const canvas = canvasRef.current;
+            const dataUrl = canvas.toDataURL('image/png');
+            const base64Data = dataUrl.split(',')[1];
+
+            const imagePart = {
+                inlineData: {
+                    mimeType: 'image/png',
+                    data: base64Data,
+                },
+            };
+
+            const textPart = {
+                text: `${prompt}\n\nProvide only the raw code for the component, without any surrounding text, explanations, or markdown code fences.`
+            };
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: { parts: [imagePart, textPart] },
+            });
+            
+            setGeneratedCode(response.text);
+            addLog('UI/UX Architect', 'Successfully generated UI component from canvas drawing.');
+
+        } catch (error) {
+            console.error("Error generating from canvas:", error);
+            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+            setGeneratedCode(`// Error generating code:\n// ${errorMessage}`);
+            addLog('Error', `Failed to generate code from canvas: ${errorMessage}`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="h-full flex flex-col lg:flex-row gap-4 p-4 bg-gray-900 text-white">
+            <div className="flex-1 flex flex-col min-h-[300px] lg:h-full">
+                <h3 className="text-lg font-bold mb-2">UI Mockup Canvas</h3>
+                <div className="relative flex-grow bg-white rounded-lg overflow-hidden border border-gray-700">
+                    <canvas
+                        ref={canvasRef}
+                        width={800}
+                        height={600}
+                        className="w-full h-full"
+                        onMouseDown={startDrawing}
+                        onMouseMove={draw}
+                        onMouseUp={stopDrawing}
+                        onMouseLeave={stopDrawing}
+                    />
+                     <div className="absolute top-2 right-2">
+                        <button onClick={handleClearCanvas} className="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm">Clear</button>
+                    </div>
+                </div>
+            </div>
+            <div className="lg:w-1/2 min-w-[300px] lg:max-w-2xl flex flex-col bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                <h3 className="text-lg font-bold mb-2 flex items-center"><SparklesIcon className="w-5 h-5 mr-2 text-yellow-300"/> AI Code Generation</h3>
+                <p className="text-sm text-gray-400 mb-4">Draw a simple UI in the canvas, then describe what you want the AI to build.</p>
+                <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="e.g., Generate a React component with Tailwind CSS based on this UI mockup."
+                    className="w-full h-24 bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar mb-3"
+                />
+                <button
+                    onClick={handleGenerate}
+                    disabled={isLoading}
+                    className="flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
+                >
+                    <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
+                    {isLoading ? 'Generating...' : 'Generate Code'}
+                </button>
+
+                <div className="flex-grow mt-4 overflow-hidden flex flex-col">
+                    <h4 className="font-semibold text-gray-200 mb-2">Generated Code:</h4>
+                    {isLoading && <div className="flex justify-center items-center h-full"><ArrowPathIcon /> <span className="ml-2">AI is building your component...</span></div>}
+                    {!isLoading && !generatedCode && (
+                        <div className="flex justify-center items-center h-full text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-lg">
+                            <p>Generated code will appear here.</p>
+                        </div>
+                    )}
+                    {generatedCode && (
+                         <div className="flex-1 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg custom-scrollbar">
+                            <pre className="p-4 font-mono text-sm relative w-full">
+                                <code className="block whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applySyntaxHighlighting(generatedCode, 'tsx') }} />
+                            </pre>
+                         </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const RequirementsView = ({ onProcess, requirements }: { onProcess: (docText: string) => Promise<void>, requirements: Requirement[] }) => {
     const [documentText, setDocumentText] = useState('');
@@ -371,37 +550,6 @@ const CodeEditorView = ({ file, onCodeChange }: { file: FileNode, onCodeChange: 
     const [prompt, setPrompt] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const applySyntaxHighlighting = (code: string, extension?: string) => {
-        if (!extension) return code;
-        let highlighted = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        
-        // Basic syntax highlighting rules
-        if (['tsx', 'js'].includes(extension)) {
-            highlighted = highlighted
-                .replace(/\b(import|from|export|default|const|let|var|function|return|if|else|switch|case|for|while|new|async|await|of|in)\b/g, '<span class="text-purple-400">$&</span>')
-                .replace(/\b(React|useState|useEffect|useCallback|useRef|null|true|false|document|window)\b/g, '<span class="text-sky-400">$&</span>')
-                .replace(/(\'|\")(.*?)(\'|\")/g, '<span class="text-green-400">$&</span>')
-                .replace(/(\/\*[\s\S]*?\*\/)|(\/\/.*)/g, '<span class="text-gray-500">$&</span>')
-                .replace(/(<)(\/?\w+)(.*?)(\/?>)/g, '$1<span class="text-sky-400">$2</span>$3$4');
-        } else if (extension === 'json') {
-             highlighted = highlighted
-                .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, (match) => {
-                    if (/:$/.test(match)) {
-                        return `<span class="text-sky-400">${match}</span>`;
-                    }
-                    return `<span class="text-green-400">${match}</span>`;
-                })
-                .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>');
-        } else if (extension === 'html') {
-             highlighted = highlighted
-                .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>')
-                .replace(/(&lt;)(\/?\w+)/g, '$1<span class="text-sky-400">$2</span>')
-                .replace(/(\w+)=(".*?"|'.*?')/g, '<span class="text-purple-400">$1</span>=<span class="text-green-400">$2</span>');
-        }
-
-        return highlighted;
-    };
-
     const handleGenerate = async () => {
         if (!prompt.trim()) return;
         setIsLoading(true);
@@ -477,7 +625,7 @@ const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, r
             <div className="flex-grow overflow-y-auto">
                 {activeView === 'chat' && <ChatView conversation={conversation} onSendMessage={onSendMessage} />}
                 {activeView === 'requirements' && <RequirementsView onProcess={onProcessDocument} requirements={requirements} />}
-                {activeView === 'canvas' && <CanvasView />}
+                {activeView === 'canvas' && <CanvasView addLog={addLog}/>}
                 {activeView === 'review' && <CodeReviewView addLog={addLog} />}
                 {activeView === 'editor' && activeFile && <CodeEditorView file={activeFile} onCodeChange={handleCodeChangeForFile} />}
             </div>
