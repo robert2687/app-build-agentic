@@ -5,6 +5,48 @@ import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
 import * as pluginBabel from "https://esm.sh/prettier@3.3.2/plugins/babel";
 import * as pluginEstree from "https://esm.sh/prettier@3.3.2/plugins/estree";
 import * as pluginHtml from "https://esm.sh/prettier@3.3.2/plugins/html";
+import * as pluginPostcss from "https://esm.sh/prettier@3.3.2/plugins/postcss";
+import * as monaco from 'https://esm.sh/monaco-editor@0.49.0';
+
+declare global {
+  interface Window {
+    Babel: any;
+  }
+}
+
+// --- HELPERS ---
+const formatCodeWithPrettier = async (content: string, extension: string): Promise<string> => {
+    try {
+        const parserMap: { [key: string]: string } = {
+            'js': 'babel', 'jsx': 'babel', 'ts': 'babel-ts', 'tsx': 'babel-ts', 'css': 'css'
+        };
+        const pluginMap: { [key: string]: any[] } = {
+            'js': [pluginBabel, pluginEstree], 'jsx': [pluginBabel, pluginEstree],
+            'ts': [pluginBabel, pluginEstree], 'tsx': [pluginBabel, pluginEstree],
+            'css': [pluginPostcss]
+        };
+        const parser = parserMap[extension];
+        const plugins = pluginMap[extension];
+
+        if (!parser || !plugins) {
+            return content; // Don't format if not a supported file type
+        }
+
+        return await prettier.format(content, {
+            parser,
+            plugins: plugins,
+            printWidth: 80,
+            tabWidth: 2,
+            useTabs: false,
+            semi: true,
+            singleQuote: true,
+        });
+    } catch (error) {
+        console.warn(`Prettier formatting failed for extension ${extension}:`, error);
+        return content; // Return original content on error
+    }
+};
+
 
 // --- ERROR BOUNDARY ---
 interface ErrorBoundaryProps {
@@ -84,8 +126,11 @@ interface Agent {
 }
 
 interface Message {
-  from: 'user' | 'ai';
-  text: string;
+  id: number;
+  sender: 'user' | 'ai' | 'system';
+  content: string;
+  plan?: any[];
+  error?: string;
 }
 
 interface PullRequest {
@@ -102,6 +147,7 @@ interface PullRequest {
 }
 
 interface TerminalLog {
+    id: number;
     time: string;
     source: string;
     message: string;
@@ -114,11 +160,144 @@ interface AgentMessage {
     message: string;
 }
 
-// --- ICONS (as stateless functional components) ---
-const FolderIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-  </svg>
+interface Commit {
+    id: string;
+    message: string;
+    author: string;
+    date: string;
+}
+
+// --- MOCK DATA ---
+const initialFiles: FileNode[] = [
+    {
+        name: 'public',
+        type: 'folder',
+        path: '/public',
+        children: [
+            { name: 'index.html', type: 'file', extension: 'html', path: '/public/index.html', content: '<div id="root"></div>' },
+        ],
+    },
+    {
+        name: 'src',
+        type: 'folder',
+        path: '/src',
+        children: [
+            { name: 'App.tsx', type: 'file', extension: 'tsx', path: '/src/App.tsx', content: `import React, { useState } from 'react';
+
+function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div className="app">
+      <h1>Hello Agentic!</h1>
+      <p>A simple React app, live-reloaded.</p>
+      <div className="card">
+        <button onClick={() => setCount((count) => count + 1)}>
+          Count is {count}
+        </button>
+        <p>Edit <code>src/App.tsx</code> and watch the preview update.</p>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+` },
+            { name: 'index.tsx', type: 'file', extension: 'tsx', path: '/src/index.tsx', content: `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './styles.css';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+` },
+            { name: 'styles.css', type: 'file', extension: 'css', path: '/src/styles.css', content: `body {
+  background-color: #242424;
+  color: rgba(255, 255, 255, 0.87);
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  text-align: center;
+  padding-top: 4rem;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.card {
+  padding: 2em;
+  border: 1px solid #444;
+  border-radius: 8px;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+  color: white;
+}
+button:hover {
+  border-color: #646cff;
+}
+` },
+        ],
+    },
+    { name: 'package.json', type: 'file', extension: 'json', path: '/package.json', content: '{ "name": "my-app" }' },
+    { name: '.gitignore', type: 'file', path: '/.gitignore', content: `# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules/
+
+# production
+dist/
+build/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# misc
+.DS_Store
+.vscode/
+` },
+];
+
+const initialAgents: Agent[] = [
+    { name: 'Orchestrator', status: 'Idle' },
+    { name: 'Frontend-Dev', status: 'Idle' },
+    { name: 'Backend-Dev', status: 'Idle' },
+    { name: 'QA-Tester', status: 'Idle' },
+];
+
+
+// --- ICONS ---
+const FolderIcon = ({ open }: { open?: boolean }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {open ? <path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /> : <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />}
+    </svg>
 );
 
 const GenericFileIcon = ({ className = 'text-gray-400' } : { className?: string}) => (
@@ -128,1201 +307,1281 @@ const GenericFileIcon = ({ className = 'text-gray-400' } : { className?: string}
 );
 
 const HtmlIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
-        <rect width="24" height="24" rx="3" fill="#e34c26" />
-        <text x="4" y="17" fontFamily="monospace" fontSize="12" fontWeight="bold" fill="white">{"<>"}</text>
-    </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0 text-[#E34F26]" fill="currentColor" viewBox="0 0 24 24"><path d="M1.5 0h21l-1.91 21.563L11.977 24l-8.564-2.438L1.5 0zM12 19.45l5.438-1.582L17.99 6.84H6.8l.533 6.01h6.826l-.4 4.512-2.16.604-2.138-.602-.133-1.496H6.182l.24 2.65L12 19.45z"/></svg>
 );
 
 const JsonIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
-        <rect width="24" height="24" rx="3" fill="#f1e05a" />
-        <text x="4" y="17" fontFamily="monospace" fontSize="12" fontWeight="bold" fill="black">{"{}"}</text>
-    </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0 text-yellow-400" fill="currentColor" viewBox="0 0 24 24"><path d="M16 12.016c0-1.094-.906-2.016-2-2.016v-4c3.313 0 6 2.688 6 6s-2.688 6-6 6v-4c1.094 0 2-.922 2-1.984zM8 11.984c0-1.062.906-1.984 2-1.984v4c-1.094 0-2-.922-2-2.016zM22 12c0 5.531-4.469 10-10 10S2 17.531 2 12 6.469 2 12 2s10 4.469 10 10z"/></svg>
 );
 
 const JsIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
-        <rect width="24" height="24" rx="3" fill="#f7df1e" />
-        <text x="6" y="17" fontFamily="monospace" fontSize="14" fontWeight="bold" fill="black">JS</text>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" fill="#F7DF1E" viewBox="0 0 24 24">
+        <rect width="24" height="24" fill="black" />
+        <path d="M17.4 18.2c.4-.3.6-.8.6-1.3 0-1.1-.8-1.7-2.3-1.7h-1.4v3.4h1.5c1.4 0 2.1-.6 2.1-1.4zm-1.5-.9h-.6v-1.1h.6c.6 0 .9.2.9.6 0 .3-.3.5-.9.5zm-3.8 2.2h1.6v-6.8H10v5.4h2.1v1.4zm3.8-11.8H6.5v13h11.1V6.7z"/>
     </svg>
 );
 
-const TSIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
-        <rect width="24" height="24" rx="3" fill="#3178c6" />
-        <text x="5" y="17" fontFamily="monospace" fontSize="14" fontWeight="bold" fill="white">TS</text>
+const TsxIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" fill="#3178C6" viewBox="0 0 24 24">
+        <rect width="24" height="24" />
+        <path fill="white" d="M12.2 11.4v1.8h-1.8v1.3h1.8v1.8h1.4v-1.8h1.8v-1.3h-1.8v-1.8h-1.4zM9.8 11.9c0-.4.3-.7.7-.7h1.6v-1.4H10c-1.2 0-2 .8-2 2.1 0 1.2.7 2 2 2h1.5v-1.4h-1.6c-.4 0-.7-.3-.7-.6zm5.6-2.3v-.9H9.4v1.4h1.7c.3 0 .5.2.5.5v4.3c0 .3-.2.5-.5.5H9.4v1.4h6v-.9h-4.4v-1.2h3.2v-.9h-3.2v-1.3h4.6z"/>
     </svg>
 );
 
-const FileIcon = ({ extension }: { extension?: string }) => {
+const CssIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0 text-[#1572B6]" fill="currentColor" viewBox="0 0 24 24"><path d="M1.5 0h21l-1.91 21.563L11.977 24l-8.564-2.438L1.5 0zM19.42 6.55l-9.13 3.996.113.454.112.455h4.22l-.25 2.817-2.13.588-2.13-.587-.14-1.58H6.3l.28 3.17L12 17.4l5.42-1.49.72-8.36z"/></svg>
+);
+
+const NewFileIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+);
+
+const NewFolderIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 4h16a2 2 0 002-2V7a2 2 0 00-2-2h-5l-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
+    </svg>
+);
+
+const FormatCodeIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+    </svg>
+);
+
+const SourceControlIcon = ({className}: {className?: string}) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.21-1.02-.584-1.39l-4.5-4.5a2.25 2.25 0 00-3.182 0l-1.82 1.82a2.25 2.25 0 01-3.182 0l-4.5-4.5a2.25 2.25 0 00-3.182 0l-1.82 1.82A2.25 2.25 0 002.25 6.75z" />
+    </svg>
+);
+
+const ExplorerIcon = ({className}: {className?: string}) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.75h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5M21 21V3M3 3v18" />
+    </svg>
+);
+
+const FileIcon = ({ extension, name }: { extension?: string, name: string }) => {
+  if (name === '.gitignore') {
+    return <GenericFileIcon className="text-gray-500" />;
+  }
   switch (extension) {
-    case 'html':
-      return <HtmlIcon />;
-    case 'json':
-      return <JsonIcon />;
-    case 'js':
-      return <JsIcon />;
-    case 'ts':
-    case 'tsx':
-      return <TSIcon />;
-    default:
-      return <GenericFileIcon />;
+    case 'html': return <HtmlIcon />;
+    case 'json': return <JsonIcon />;
+    case 'js': return <JsIcon />;
+    case 'tsx': case 'ts': return <TsxIcon />;
+    case 'css': return <CssIcon />;
+    default: return <GenericFileIcon />;
   }
 };
 
 
-const CpuChipIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-3 shrink-0">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V8.25a2.25 2.25 0 0 0-2.25-2.25H8.25a2.25 2.25 0 0 0-2.25 2.25v9.5A2.25 2.25 0 0 0 8.25 19.5Z" />
-    </svg>
-);
+// --- UI COMPONENTS ---
 
-const DocumentTextIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-);
-
-const CodeBracketIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 12" />
-    </svg>
-);
-
-const ChatBubbleLeftRightIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193l-3.72 3.72a1.125 1.125 0 0 1-1.59 0l-3.72-3.72c-1.133-.093-1.98-1.057-1.98-2.193v-4.286c0-.97.616-1.813 1.5-2.097m0 0A7.5 7.5 0 1 0 5.75 8.511m14.5 0c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193l-3.72 3.72a1.125 1.125 0 0 1-1.59 0l-3.72-3.72c-1.133-.093-1.98-1.057-1.98-2.193v-4.286c0-.97.616-1.813 1.5-2.097m0 0A7.5 7.5 0 1 0 5.75 8.511" />
-    </svg>
-);
-
-const SearchIcon = ({ className = 'h-4 w-4 text-gray-400' }: { className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-);
-
-const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-500"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
-const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-red-500"><path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
-const ArrowPathIcon = ({ spinning = true }: { spinning?: boolean }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 text-blue-400 ${spinning ? 'animate-spin' : ''}`}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 11.667 0l3.181-3.183m-4.991-2.691v4.992m0 0-3.182-3.182a8.25 8.25 0 0 1-11.667 0l-3.181 3.182m4.991 2.691H7.965M16.023 9.348A8.25 8.25 0 0 1 19.5 12m0 0a8.25 8.25 0 0 1-3.477 6.651m-3.477-6.651a8.25 8.25 0 0 0-3.477-6.651m3.477 6.651L12 12" /></svg>;
-const SparklesIcon = ({ className = "w-5 h-5 mr-3 text-yellow-400" }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg>;
-
-const FullscreenEnterIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-    </svg>
-);
-
-const FullscreenExitIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" />
-    </svg>
-);
-
-const WandIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.475 2.118A2.25 2.25 0 0 1 .75 15.375a3 3 0 0 0 5.78-1.128 2.25 2.25 0 0 1 2.475-2.118 2.25 2.25 0 0 1 2.475 2.118ZM8.25 10.5a3 3 0 1 1-5.78-1.128 2.25 2.25 0 0 0-2.475-2.118A2.25 2.25 0 0 0 .75 9.375a3 3 0 0 1 5.78 1.128 2.25 2.25 0 0 0 2.475 2.118 2.25 2.25 0 0 0 2.475-2.118Zm8.25-3a3 3 0 1 0-5.78 1.128 2.25 2.25 0 0 1-2.475 2.118A2.25 2.25 0 0 1 5.25 4.875a3 3 0 0 0 5.78-1.128 2.25 2.25 0 0 1 2.475-2.118 2.25 2.25 0 0 1 2.475 2.118Z" />
-    </svg>
-);
-
-// --- MOCK DATA ---
-const initialFileStructure: FileNode[] = [
-  { name: 'src', type: 'folder', path: 'src', children: [
-      { name: 'App.tsx', type: 'file', extension: 'tsx', path: 'src/App.tsx', content: `import React from 'react';\n\nexport default function App() {\n  return (\n    <div className="bg-slate-900 text-white min-h-screen p-8">\n      <h1 className="text-4xl font-bold">Welcome to your new App!</h1>\n      <p className="mt-4 text-slate-400">Get started by editing this file.</p>\n    </div>\n  );\n}` },
-      { name: 'index.tsx', type: 'file', extension: 'tsx', path: 'src/index.tsx', content: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nconst root = ReactDOM.createRoot(document.getElementById('root'));\nroot.render(<App />);` },
-  ]},
-  { name: 'public', type: 'folder', path: 'public', children: [
-      { name: 'index.html', type: 'file', extension: 'html', path: 'public/index.html', content: `<!DOCTYPE html>\n<html>\n  <head>\n    <title>My App</title>\n    <script src="https://cdn.tailwindcss.com"></script>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/index.tsx"></script>\n  </body>\n</html>` },
-  ]},
-  { name: 'package.json', type: 'file', extension: 'json', path: 'package.json', content: `{\n  "name": "new-project",\n  "version": "1.0.0",\n  "dependencies": {\n    "react": "^19",\n    "react-dom": "^19"\n  }\n}` },
-];
-const initialAgents: Agent[] = [
-  { name: 'Requirements Analyst', status: 'Idle' },
-  { name: 'UI/UX Architect', status: 'Idle' },
-  { name: 'Frontend Coder', status: 'Idle' },
-  { name: 'Backend Coder', status: 'Idle' },
-  { name: 'QA & Security Agent', status: 'Idle' },
-  { name: 'DevOps & Deployment Agent', status: 'Idle' },
-];
-const initialConversation: Message[] = [];
-const initialPullRequest: PullRequest = {
-  id: 1, title: 'feat: Initial project structure', author: 'DevOps & Deployment Agent', branch: 'main',
-  changes: `+ {
-+   "name": "new-project",
-+   "version": "1.0.0"
-+ }`,
-  tests: { passed: 0, failed: 0, coverage: 'N/A' }
-};
-const initialTerminalLogs: TerminalLog[] = [
-  { time: '13:37:01', source: 'Orchestrator', message: 'Initializing project workspace...' },
-  { time: '13:37:02', source: 'DevOps Agent', message: 'Cloning repository...' },
-  { time: '13:37:05', source: 'DevOps Agent', message: 'Installing dependencies...' },
-  { time: '13:37:10', source: 'Orchestrator', message: 'Project initialized. AI agents are standing by.' },
-  { time: '13:37:11', source: 'Orchestrator', message: 'Awaiting user instructions in the chat.' },
-];
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
-// --- UTILITY FUNCTIONS ---
-const applySyntaxHighlighting = (code: string, extension?: string) => {
-    if (!extension && !code) return '';
-    let processedCode = code || '';
-    let highlighted = processedCode.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    
-    const currentExtension = extension || 'tsx'; // Default to tsx for generated code
-    if (['tsx', 'js'].includes(currentExtension)) {
-        highlighted = highlighted
-            .replace(/\b(import|from|export|default|const|let|var|function|return|if|else|switch|case|for|while|new|async|await|of|in)\b/g, '<span class="text-purple-400">$&</span>')
-            .replace(/\b(React|useState|useEffect|useCallback|useRef|null|true|false|document|window)\b/g, '<span class="text-sky-400">$&</span>')
-            .replace(/(\'|\")(.*?)(\'|\")/g, '<span class="text-green-400">$&</span>')
-            .replace(/(\/\*[\s\S]*?\*\/)|(\/\/.*)/g, '<span class="text-gray-500">$&</span>')
-            .replace(/(<)(\/?\w+)(.*?)(\/?>)/g, '$1<span class="text-sky-400">$2</span>$3$4');
-    } else if (currentExtension === 'json') {
-         highlighted = highlighted
-            .replace(/"([^"\\]|\\.)*"/g, (match, group) => {
-                // This regex is a simplification, but good enough for highlighting
-                return `<span class="text-green-400">${match}</span>`;
-            })
-            .replace(/(?<=<span class="text-green-400">"[^"]+"<\/span>\s*):/g, (match) => {
-                // This is a tricky part. We are trying to color the key differently.
-                // A better approach would be a proper tokenizer.
-                // For now, let's just color all strings green.
-                return match;
-            })
-            .replace(/\b(true|false|null)\b/g, '<span class="text-purple-400">$&</span>')
-            .replace(/\b-?\d+(\.\d+)?([eE][+-]?\d+)?\b/g, '<span class="text-orange-400">$&</span>'); // For numbers
-    } else if (currentExtension === 'html') {
-         highlighted = highlighted
-            .replace(/&lt;!--[\s\S]*?--&gt;/g, '<span class="text-gray-500">$&</span>') // Comments
-            .replace(/(&lt;\/?)([\w-]+)/g, '$1<span class="text-sky-400">$2</span>') // Tags
-            .replace(/([\w-]+)=/g, '<span class="text-purple-400">$1</span>=') // Attributes
-            .replace(/(".*?"|'.*?')/g, '<span class="text-green-400">$1</span>'); // Attribute values
-    }
-
-    return highlighted;
-};
-
-const renderDesignDocument = (markdown: string) => {
-    let html = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    html = html
-        .replace(/^### (.*$)/gim, '<h3 class="text-xl font-bold mt-8 mb-4 text-sky-300">$1</h3>')
-        .replace(/`([^`]+)`/g, '<code class="bg-gray-700 text-cyan-300 font-mono px-1.5 py-1 rounded text-sm">$1</code>');
-    
-    const lines = html.split('\n');
-    let inList = false;
-    let result = '';
-
-    for (const line of lines) {
-        if (line.trim().startsWith('- ')) {
-            if (!inList) {
-                result += '<ul class="list-disc pl-6 space-y-2 my-4">';
-                inList = true;
-            }
-            result += `<li class="text-gray-300">${line.trim().substring(2)}</li>`;
-        } else {
-            if (inList) {
-                result += '</ul>';
-                inList = false;
-            }
-            if (line.startsWith('<h3')) {
-                result += line;
-            } else if (line.trim()) {
-                result += `<p class="mb-4 text-gray-400 leading-relaxed">${line}</p>`;
-            }
-        }
-    }
-
-    if (inList) {
-        result += '</ul>';
-    }
-
-    return result;
-};
-
-
-// --- CHILD COMPONENTS ---
-
-const FileTree = ({ files, level = 0, onFileSelect, activeFile }: { files: FileNode[], level?: number, onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => (
-  <div style={{ paddingLeft: `${level * 1}rem` }}>
-    {files.map(file => (
-      <div key={file.path}>
-        <div 
-            onClick={() => file.type === 'file' && onFileSelect(file)}
-            className={`flex items-center py-1 text-sm text-gray-300 rounded-md px-2 transition-colors duration-150 ${file.type === 'file' ? 'cursor-pointer hover:bg-gray-700/50' : ''} ${activeFile?.path === file.path ? 'bg-gray-700' : ''}`}
-        >
-          {file.type === 'folder' ? <FolderIcon /> : <FileIcon extension={file.extension} />}
-          <span>{file.name}</span>
-        </div>
-        {file.children && <FileTree files={file.children} level={level + 1} onFileSelect={onFileSelect} activeFile={activeFile} />}
-      </div>
-    ))}
-  </div>
-);
-
-const LeftPanel = ({ agents, files, onFileSelect, activeFile }: { agents: Agent[], files: FileNode[], onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const filterFileTree = useCallback((nodes: FileNode[], term: string): FileNode[] => {
-    if (!term.trim()) {
-      return nodes;
-    }
-    const lowerCaseTerm = term.toLowerCase();
-    const result: FileNode[] = [];
-
-    for (const node of nodes) {
-      if (node.type === 'folder') {
-        if (node.name.toLowerCase().includes(lowerCaseTerm)) {
-          result.push(node); // Include folder and all its children
-        } else {
-          const filteredChildren = filterFileTree(node.children || [], term);
-          if (filteredChildren.length > 0) {
-            result.push({ ...node, children: filteredChildren }); // Include folder with filtered children
-          }
-        }
-      } else { // It's a file
-        if (node.name.toLowerCase().includes(lowerCaseTerm)) {
-          result.push(node);
-        }
-      }
-    }
-    return result;
-  }, []);
-
-  const filteredFiles = useMemo(() => filterFileTree(files, searchTerm), [files, searchTerm, filterFileTree]);
-  
+const HighlightedText = ({ text, highlight }: { text: string; highlight: string }) => {
+  if (!highlight.trim()) {
+    return <span>{text}</span>;
+  }
+  const regex = new RegExp(`(${highlight})`, 'gi');
+  const parts = text.split(regex);
   return (
-    <aside className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700 text-white w-72 p-4 flex flex-col shrink-0">
-      <div className="flex items-center mb-6">
-        <SparklesIcon className="w-6 h-6 mr-2 text-yellow-400" />
-        <h1 className="text-xl font-bold">Agentic</h1>
-      </div>
-      
-      <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">Project Files</h2>
-      <div className="relative mb-3 px-1">
-        <input
-          type="text"
-          placeholder="Search files..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 pl-8 pr-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <SearchIcon />
-        </div>
-      </div>
-      <div className="flex-grow overflow-y-auto mb-6 pr-2 custom-scrollbar">
-        <FileTree files={filteredFiles} onFileSelect={onFileSelect} activeFile={activeFile} />
-      </div>
-
-      <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">AI Agent Team</h2>
-      <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
-        {agents.map(agent => (
-          <div key={agent.name} className="flex items-start text-sm">
-            <CpuChipIcon />
-            <div>
-              <p className="font-semibold text-gray-200">{agent.name}</p>
-              {agent.status === 'Active' ? (
-                <div className="flex items-center text-blue-400">
-                  <ArrowPathIcon />
-                  <span className="ml-2 text-gray-300">{agent.task}</span>
-                </div>
-              ) : (
-                <p className="text-gray-400">{agent.status}</p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </aside>
+    <span>
+      {parts.map((part, i) =>
+        part.toLowerCase() === highlight.toLowerCase() ? (
+          <span key={i} className="bg-yellow-500 text-black rounded-sm">
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </span>
   );
 };
 
-const ChatView = ({ conversation, onSendMessage }: { conversation: Message[], onSendMessage: (text: string) => Promise<void> }) => {
-    const [userInput, setUserInput] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const chatEndRef = useRef<HTMLDivElement>(null);
+const FileTree = ({
+    nodes,
+    onSelectFile,
+    selectedFile,
+    searchTerm,
+}: {
+    nodes: FileNode[];
+    onSelectFile: (node: FileNode) => void;
+    selectedFile: FileNode | null;
+    searchTerm: string;
+}) => {
+    const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [conversation, isLoading]);
-
-    const handleSend = async () => {
-        if (!userInput.trim() || isLoading) return;
-        setIsLoading(true);
-        await onSendMessage(userInput);
-        setUserInput('');
-        setIsLoading(false);
-    };
-
-    return (
-        <div className="flex flex-col h-full p-4 bg-gray-900">
-            <div className="flex-grow space-y-4 overflow-y-auto pr-4 mb-4 custom-scrollbar">
-                {conversation.map((msg, i) => (
-                    <div key={i} className={`flex items-start gap-3 ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        {msg.from === 'ai' && <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold text-sm shrink-0 mt-1"><SparklesIcon className="w-5 h-5 text-yellow-400"/></div>}
-                        <div className={`max-w-xl p-4 rounded-2xl shadow-md ${msg.from === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-700 text-gray-200 rounded-bl-none'}`}>
-                            <p className="whitespace-pre-wrap">{msg.text}</p>
-                        </div>
-                    </div>
-                ))}
-                {isLoading && (
-                    <div className="flex items-start gap-3 justify-start">
-                        <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold text-sm shrink-0 mt-1"><SparklesIcon className="w-5 h-5 text-yellow-400"/></div>
-                        <div className="max-w-lg p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-bl-none flex items-center">
-                            <div className="dot-flashing"></div>
-                        </div>
-                    </div>
-                )}
-                <div ref={chatEndRef} />
-            </div>
-            <div className="mt-auto flex items-center border border-gray-600 rounded-lg p-2 bg-gray-800 focus-within:ring-2 focus-within:ring-blue-500 transition-shadow">
-                <input type="text" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSend()} placeholder="Give instructions to your AI team..." className="flex-grow bg-transparent focus:outline-none text-gray-200 ml-2"/>
-                <button onClick={handleSend} disabled={isLoading} className="ml-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors">Send</button>
-            </div>
-        </div>
-    );
-};
-
-const CanvasView = ({ addLog }: { addLog: (source: string, message: string) => void }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [isDrawing, setIsDrawing] = useState(false);
-    const [prompt, setPrompt] = useState('Generate a React component with Tailwind CSS based on this UI mockup.');
-    const [generatedCode, setGeneratedCode] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const getCanvasContext = () => {
-        const canvas = canvasRef.current;
-        if (!canvas) return null;
-        return canvas.getContext('2d');
-    }
-
-    useEffect(() => {
-        const ctx = getCanvasContext();
-        if (ctx) {
-            ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 2;
-        }
-    }, []);
-    
-    const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const ctx = getCanvasContext();
-        if (!ctx) return;
-        setIsDrawing(true);
-        ctx.beginPath();
-        ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-    };
-
-    const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (!isDrawing) return;
-        const ctx = getCanvasContext();
-        if (!ctx) return;
-        ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-        ctx.stroke();
-    };
-
-    const stopDrawing = () => {
-        const ctx = getCanvasContext();
-        if (!ctx) return;
-        ctx.closePath();
-        setIsDrawing(false);
-    };
-
-    const handleClearCanvas = () => {
-        const ctx = getCanvasContext();
-        if (ctx) {
-            ctx.fillStyle = "white";
-            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            addLog('Canvas', 'Canvas cleared.');
-        }
-    };
-    
-    const handleGenerate = async () => {
-        if (!prompt.trim() || !canvasRef.current) return;
-        setIsLoading(true);
-        setGeneratedCode('');
-        addLog('UI/UX Architect', `Generating code from canvas with prompt: "${prompt}"`);
-
-        try {
-            const canvas = canvasRef.current;
-            const dataUrl = canvas.toDataURL('image/png');
-            const base64Data = dataUrl.split(',')[1];
-
-            const imagePart = {
-                inlineData: {
-                    mimeType: 'image/png',
-                    data: base64Data,
-                },
+        // If there's a search term, expand all folders to show the results within them.
+        if (searchTerm) {
+            const allFolderPaths: Record<string, boolean> = {};
+            const expandFolders = (nodes: FileNode[]) => {
+                nodes.forEach(node => {
+                    if (node.type === 'folder') {
+                        allFolderPaths[node.path] = true;
+                        if (node.children) expandFolders(node.children);
+                    }
+                });
             };
-
-            const textPart = {
-                text: `${prompt}\n\nProvide only the raw code for the component, without any surrounding text, explanations, or markdown code fences.`
-            };
-
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: [imagePart, textPart] },
-            });
-            
-            setGeneratedCode(response.text);
-            addLog('UI/UX Architect', 'Successfully generated UI component from canvas drawing.');
-
-        } catch (error) {
-            console.error("Error generating from canvas:", error);
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            setGeneratedCode(`// Error generating code:\n// ${errorMessage}`);
-            addLog('Error', `Failed to generate code from canvas: ${errorMessage}`);
-        } finally {
-            setIsLoading(false);
+            expandFolders(nodes);
+            // We only expand folders during a search. When the search is cleared,
+            // the user's manually set open/closed states are preserved.
+            setOpenFolders(allFolderPaths);
         }
+    }, [searchTerm, nodes]);
+
+    const toggleFolder = (path: string) => {
+        setOpenFolders(prev => ({ ...prev, [path]: !prev[path] }));
     };
 
-    return (
-        <div className="h-full flex flex-col lg:flex-row gap-4 p-4 bg-gray-900 text-white">
-            <div className="flex-1 flex flex-col min-h-[300px] lg:h-full">
-                <h3 className="text-lg font-bold mb-2">UI Mockup Canvas</h3>
-                <div className="relative flex-grow bg-white rounded-lg overflow-hidden border border-gray-700">
-                    <canvas
-                        ref={canvasRef}
-                        width={800}
-                        height={600}
-                        className="w-full h-full"
-                        onMouseDown={startDrawing}
-                        onMouseMove={draw}
-                        onMouseUp={stopDrawing}
-                        onMouseLeave={stopDrawing}
-                    />
-                     <div className="absolute top-2 right-2">
-                        <button onClick={handleClearCanvas} className="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-md transition-colors text-sm">Clear</button>
-                    </div>
-                </div>
-            </div>
-            <div className="lg:w-1/2 min-w-[300px] lg:max-w-2xl flex flex-col bg-gray-800/50 p-4 rounded-lg border border-gray-700">
-                <h3 className="text-lg font-bold mb-2 flex items-center"><SparklesIcon className="w-5 h-5 mr-2 text-yellow-300"/> AI Code Generation</h3>
-                <p className="text-sm text-gray-400 mb-4">Draw a simple UI in the canvas, then describe what you want the AI to build.</p>
-                <textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g., Generate a React component with Tailwind CSS based on this UI mockup."
-                    className="w-full h-24 bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar mb-3"
-                />
-                <button
-                    onClick={handleGenerate}
-                    disabled={isLoading}
-                    className="flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
-                >
-                    <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
-                    {isLoading ? 'Generating...' : 'Generate Code'}
-                </button>
+    const filterNodes = (nodes: FileNode[], term: string): FileNode[] => {
+        if (!term.trim()) return nodes;
+        const lowerCaseTerm = term.toLowerCase();
 
-                <div className="flex-grow mt-4 overflow-hidden flex flex-col">
-                    <h4 className="font-semibold text-gray-200 mb-2">Generated Code:</h4>
-                    {isLoading && <div className="flex justify-center items-center h-full"><ArrowPathIcon /> <span className="ml-2">AI is building your component...</span></div>}
-                    {!isLoading && !generatedCode && (
-                        <div className="flex justify-center items-center h-full text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-lg">
-                            <p>Generated code will appear here.</p>
+        return nodes.reduce((acc: FileNode[], node) => {
+            if (node.type === 'folder') {
+                const filteredChildren = node.children ? filterNodes(node.children, term) : [];
+                if (node.name.toLowerCase().includes(lowerCaseTerm) || filteredChildren.length > 0) {
+                    acc.push({ ...node, children: filteredChildren });
+                }
+            } else { // File
+                if (node.name.toLowerCase().includes(lowerCaseTerm)) {
+                    acc.push(node);
+                }
+            }
+            return acc;
+        }, []);
+    };
+
+    const filteredNodes = useMemo(() => filterNodes(nodes, searchTerm), [nodes, searchTerm]);
+
+    const renderNode = (node: FileNode, depth: number) => {
+        const isFolder = node.type === 'folder';
+        const isOpen = openFolders[node.path] || false;
+        const isSelected = selectedFile?.path === node.path;
+
+        if (isFolder) {
+            return (
+                <div key={node.path}>
+                    <div
+                        onClick={() => toggleFolder(node.path)}
+                        className={`flex items-center cursor-pointer py-1 px-2 rounded-md ${ isSelected ? 'bg-blue-800' : 'hover:bg-gray-700' }`}
+                        style={{ paddingLeft: `${depth * 1.25}rem` }}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 mr-1 text-gray-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                        <FolderIcon open={isOpen} />
+                        <span className="truncate font-semibold text-gray-200"><HighlightedText text={node.name} highlight={searchTerm} /></span>
+                    </div>
+                    {isOpen && node.children && (
+                        <div>
+                            {node.children.sort((a,b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)).map(child => renderNode(child, depth + 1))}
                         </div>
                     )}
-                    {generatedCode && (
-                         <div className="flex-1 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg custom-scrollbar">
-                            <pre className="p-4 font-mono text-sm relative w-full">
-                                <code className="block whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applySyntaxHighlighting(generatedCode, 'tsx') }} />
-                            </pre>
-                         </div>
-                    )}
                 </div>
-            </div>
-        </div>
-    );
-};
-
-const DesignView = ({ onProcess, designDocument }: { onProcess: (docText: string) => Promise<void>, designDocument: string }) => {
-    const [documentText, setDocumentText] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleSubmit = async () => {
-        if (!documentText.trim()) return;
-        setIsLoading(true);
-        await onProcess(documentText);
-        setIsLoading(false);
-    }
-
-    return (
-        <div className="p-4 h-full flex flex-col bg-gray-900 text-white overflow-y-auto custom-scrollbar">
-            <h3 className="text-2xl font-bold mb-2">System Design</h3>
-            <p className="text-gray-400 mb-4">Provide high-level project documentation below. The AI System Architect will process it into a structured design document.</p>
-            
-            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
-                <textarea
-                    value={documentText}
-                    onChange={(e) => setDocumentText(e.target.value)}
-                    placeholder="Describe your application idea. For example: A social media platform for pet owners to share photos and schedule playdates."
-                    className="w-full h-40 bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar"
-                />
-                <button
-                    onClick={handleSubmit}
-                    disabled={isLoading}
-                    className="mt-3 flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
-                >
-                    <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
-                    {isLoading ? 'Generating...' : 'Generate Design Document'}
-                </button>
-            </div>
-
-            <h4 className="text-xl font-semibold mb-3 mt-2">AI-Generated Design Document</h4>
-            {(isLoading && !designDocument) && <div className="flex justify-center items-center h-40"><ArrowPathIcon /> <span className="ml-2">AI is drafting the design document...</span></div>}
-            
-            {!isLoading && !designDocument && (
-                <div className="text-center py-10 border-2 border-dashed border-gray-700 rounded-lg">
-                    <p className="text-gray-500">The generated design document will appear here.</p>
-                </div>
-            )}
-
-            {designDocument && (
-                <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 mt-2">
-                    <div dangerouslySetInnerHTML={{ __html: renderDesignDocument(designDocument) }} />
-                </div>
-            )}
-        </div>
-    );
-};
-
-const CodeReviewView = ({ addLog }: { addLog: (source: string, message: string) => void }) => {
-    const [summary, setSummary] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleSummarize = useCallback(async () => {
-        setIsLoading(true);
-        setSummary('');
-        addLog('User', 'Requested Pull Request summary.');
-        try {
-            const prompt = `You are a senior developer. Summarize the following code changes from a pull request in a few bullet points. Be concise and focus on the purpose of the changes.\n\nCODE CHANGES:\n\`\`\`diff\n${initialPullRequest.changes}\n\`\`\``;
-            const response = await ai.models.generateContent({model: 'gemini-2.5-flash', contents: prompt});
-            setSummary(response.text);
-            addLog('Orchestrator', 'Generated PR summary.');
-        } catch(error) {
-            console.error("Error summarizing PR:", error);
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            setSummary("Error generating summary.");
-            addLog('Error', `Failed to generate PR summary: ${errorMessage}`);
+            );
         }
-        setIsLoading(false);
-    }, [addLog]);
 
-    return (
-        <div className="p-4 h-full flex flex-col bg-gray-900 text-white">
-            <div className="mb-4 pb-4 border-b border-gray-700">
-                <p className="text-gray-400">Pull Request #{initialPullRequest.id}</p>
-                <h3 className="text-2xl font-bold">{initialPullRequest.title}</h3>
-                <p className="text-sm text-gray-300">by <span className="font-semibold">{initialPullRequest.author}</span> from branch <code className="font-mono bg-gray-700 px-1.5 py-1 rounded text-cyan-300">{initialPullRequest.branch}</code></p>
-            </div>
-            <div className="flex items-center space-x-8 mb-4 bg-gray-800 p-3 rounded-lg">
-                <div className="flex items-center"><CheckCircleIcon /><span className="ml-2 text-gray-300">{initialPullRequest.tests.passed} Tests Passed</span></div>
-                <div className="flex items-center"><XCircleIcon /><span className="ml-2 text-gray-300">{initialPullRequest.tests.failed} Tests Failed</span></div>
-                <div><span className="text-gray-400 font-semibold">Coverage: </span><span className="text-green-400 font-bold">{initialPullRequest.tests.coverage}</span></div>
-            </div>
-            
-            <div className="mb-4">
-                <button onClick={handleSummarize} disabled={isLoading} className="flex items-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors">
-                    <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
-                    {isLoading ? 'Summarizing...' : 'Summarize Changes'}
-                </button>
-                {summary && (
-                    <div className="mt-4 p-4 bg-gray-800 rounded-lg border border-gray-700">
-                        <h4 className="font-bold text-white mb-2">✨ AI Summary:</h4>
-                        <div className="text-gray-300 whitespace-pre-wrap prose prose-invert prose-sm" dangerouslySetInnerHTML={{ __html: summary.replace(/\n/g, '<br />') }} />
-                    </div>
-                )}
-            </div>
-
-            <div className="flex-grow bg-gray-900 border border-gray-700 rounded-lg p-4 font-mono text-sm overflow-y-auto custom-scrollbar">
-                {initialPullRequest.changes.split('\n').map((line, i) => (
-                    <div key={i} className={`flex items-start px-2 ${line.startsWith('+') ? 'bg-green-900/20' : line.startsWith('-') ? 'bg-red-900/20' : ''}`}>
-                        <span className="w-8 text-right pr-4 text-gray-500 select-none">{i + 1}</span>
-                        <span className={`w-4 text-center ${line.startsWith('+') ? 'text-green-400' : line.startsWith('-') ? 'text-red-400' : 'text-gray-500'}`}>{line.startsWith('+') ? '+' : line.startsWith('-') ? '-' : ' '}</span>
-                        <pre className="whitespace-pre-wrap flex-1"><code className={`${line.startsWith('+') ? 'text-green-300' : line.startsWith('-') ? 'text-red-300' : 'text-gray-400'}`}>{line.substring(1)}</code></pre>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
-const AgentCommunicationView = ({ messages }: { messages: AgentMessage[] }) => {
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-
-    if (messages.length === 0) {
         return (
-            <div className="flex items-center justify-center h-full text-gray-500">
-                <p>Agent communication channel is clear.</p>
+            <div
+                key={node.path}
+                onClick={() => onSelectFile(node)}
+                className={`flex items-center cursor-pointer py-1 px-2 rounded-md ${ isSelected ? 'bg-blue-800' : 'hover:bg-gray-700' }`}
+                style={{ paddingLeft: `${depth * 1.25}rem` }}
+            >
+                <div className="w-5 mr-1 shrink-0"></div>
+                <FileIcon extension={node.extension} name={node.name} />
+                <span className="truncate text-gray-300"><HighlightedText text={node.name} highlight={searchTerm} /></span>
+            </div>
+        );
+    };
+
+    return (
+        <div>
+            {filteredNodes.sort((a,b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)).map(node => renderNode(node, 0))}
+        </div>
+    );
+};
+
+const ProjectExplorer = ({ files, onSelectFile, selectedFile, onCreateFile, onCreateFolder }: { files: FileNode[], onSelectFile: (node: FileNode) => void, selectedFile: FileNode | null, onCreateFile: (filename: string) => void, onCreateFolder: (foldername: string) => void }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+
+    const handleNewFileClick = () => {
+        const fileName = prompt("Enter new file name:");
+        if (fileName) {
+            onCreateFile(fileName);
+        }
+    };
+
+    const handleNewFolderClick = () => {
+        const folderName = prompt("Enter new folder name:");
+        if (folderName) {
+            onCreateFolder(folderName);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-full">
+            <div className="flex items-center justify-between mb-2 px-2">
+                <h2 className="text-lg font-semibold">Project Explorer</h2>
+                <div className="flex items-center space-x-1">
+                    <button onClick={handleNewFolderClick} className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-gray-700" title="New Folder">
+                        <NewFolderIcon />
+                    </button>
+                    <button onClick={handleNewFileClick} className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-gray-700" title="New File">
+                        <NewFileIcon />
+                    </button>
+                </div>
+            </div>
+            <div className="relative mb-2 px-1">
+                <input
+                    type="text"
+                    placeholder="Search files..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-600 rounded-md py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            </div>
+            <div className="overflow-auto flex-grow custom-scrollbar">
+                <FileTree nodes={files} onSelectFile={onSelectFile} selectedFile={selectedFile} searchTerm={searchTerm} />
+            </div>
+        </div>
+    );
+};
+
+const CollapsibleSection = ({ title, count, children, defaultOpen = true }: { title: string, count: number, children: React.ReactNode, defaultOpen?: boolean }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+
+    if (count === 0 && title !== "History") return null;
+
+    return (
+        <div>
+            <button onClick={() => setIsOpen(!isOpen)} className="w-full flex items-center justify-between text-left p-1.5 hover:bg-gray-700 rounded-md">
+                <div className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 mr-1 shrink-0 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    <h3 className="font-bold text-sm uppercase tracking-wider">{title}</h3>
+                </div>
+                <span className="text-xs bg-gray-600 rounded-full px-2 py-0.5">{count}</span>
+            </button>
+            {isOpen && <div className="mt-1 pl-2 space-y-1">{children}</div>}
+        </div>
+    );
+};
+
+const ChangeItem = ({ path, onAction, actionIcon }: { path: string, onAction: () => void, actionIcon: '+' | '-' }) => (
+    <div className="group flex items-center justify-between text-sm p-1 rounded-md hover:bg-gray-700/50">
+        <span className="truncate">{path}</span>
+        <button onClick={onAction} className="opacity-0 group-hover:opacity-100 bg-gray-600 hover:bg-blue-600 rounded-sm p-0.5" title={actionIcon === '+' ? 'Stage Change' : 'Unstage Change'}>
+            {actionIcon === '+' ? 
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg> :
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
+            }
+        </button>
+    </div>
+);
+
+
+const SourceControlPanel = ({
+    isRepoInitialized,
+    onInitializeRepo,
+    gitStatus,
+    stagedFiles,
+    onStage,
+    onUnstage,
+    onCommit,
+    commits,
+}: {
+    isRepoInitialized: boolean;
+    onInitializeRepo: () => void;
+    gitStatus: { modified: string[], untracked: string[] };
+    stagedFiles: Set<string>;
+    onStage: (path: string) => void;
+    onUnstage: (path: string) => void;
+    onCommit: (message: string) => void;
+    commits: Commit[];
+}) => {
+    const [commitMessage, setCommitMessage] = useState('');
+
+    const handleCommitClick = () => {
+        if (!commitMessage.trim() || stagedFiles.size === 0) return;
+        onCommit(commitMessage);
+        setCommitMessage('');
+    };
+
+    if (!isRepoInitialized) {
+        return (
+            <div className="p-4 flex flex-col items-center justify-center h-full text-center">
+                <SourceControlIcon className="h-12 w-12 text-gray-500 mb-4" />
+                <p className="text-gray-400 mb-4">This directory is not yet a Git repository.</p>
+                <button onClick={onInitializeRepo} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded-md">
+                    Initialize Repository
+                </button>
             </div>
         );
     }
+    
+    const unstagedChanges = [...gitStatus.modified, ...gitStatus.untracked].filter(p => !stagedFiles.has(p));
 
     return (
-        <div className="p-4 h-full bg-gray-900 text-white overflow-y-auto custom-scrollbar">
-            <div className="space-y-4">
-                {messages.map((msg) => (
-                    <div key={msg.id} className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center shrink-0 mt-1">
-                            <CpuChipIcon />
-                        </div>
-                        <div className="flex-1">
-                            <div className="flex items-baseline gap-2">
-                                <p className="font-bold text-sky-400">{msg.from}</p>
-                                <p className="text-xs text-gray-500">{msg.time}</p>
-                            </div>
-                            <div className="bg-gray-800 p-3 rounded-lg mt-1">
-                                <p className="whitespace-pre-wrap text-gray-300">{msg.message}</p>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-                <div ref={messagesEndRef} />
-            </div>
-        </div>
-    );
-};
-
-const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void }) => {
-    const lineNumbersRef = useRef<HTMLDivElement>(null);
-    const preRef = useRef<HTMLPreElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-    const handleScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
-        const { scrollTop, scrollLeft } = e.currentTarget;
-        if (preRef.current) {
-            preRef.current.scrollTop = scrollTop;
-            preRef.current.scrollLeft = scrollLeft;
-        }
-        if (lineNumbersRef.current) {
-            lineNumbersRef.current.scrollTop = scrollTop;
-        }
-    }, []);
-
-    if (!activeFile) {
-        return <div className="flex items-center justify-center h-full text-gray-500">Select a file to view its content.</div>;
-    }
-
-    const highlightedCode = useMemo(() => 
-        applySyntaxHighlighting(activeFile.content, activeFile.extension),
-        [activeFile.content, activeFile.extension]
-    );
-
-    const lineCount = useMemo(() => (activeFile.content || '').split('\n').length, [activeFile.content]);
-
-    return (
-        <div className="font-mono text-sm text-gray-200 h-full flex overflow-hidden bg-gray-900">
-            <div ref={lineNumbersRef} className="py-2 pr-4 text-right text-gray-500 select-none bg-gray-900 border-r border-gray-700/50 overflow-y-hidden">
-                {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
-            </div>
-            <div className="relative w-full h-full">
+        <div className="flex flex-col h-full">
+            <div className="p-1 border-b border-gray-700">
                 <textarea
-                    ref={textareaRef}
-                    onScroll={handleScroll}
-                    value={activeFile.content}
-                    onChange={(e) => onCodeChange(e.target.value)}
-                    className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-white p-2 resize-none focus:outline-none leading-relaxed tracking-wide custom-scrollbar"
-                    style={{ WebkitTextFillColor: 'transparent' }}
-                    spellCheck="false"
-                    autoComplete="off"
-                    autoCapitalize="off"
+                    value={commitMessage}
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    placeholder="Commit message..."
+                    className="w-full bg-gray-900 border border-gray-600 rounded-md py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-20 resize-none custom-scrollbar"
                 />
-                <pre ref={preRef} className="absolute inset-0 p-2 pointer-events-none w-full h-full overflow-hidden leading-relaxed tracking-wide" aria-hidden="true">
-                    <code className="block whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightedCode }} />
-                </pre>
-            </div>
-        </div>
-    );
-};
-
-const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog, agentMessages }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void, formatCode: () => void, addLog: (source: string, message: string) => void, agentMessages: AgentMessage[] }) => {
-  const [activeTab, setActiveTab] = useState('code');
-  const [designDocument, setDesignDocument] = useState('');
-
-  const handleGenerateDesign = async (docText: string) => {
-    addLog('User', 'Requested design document generation.');
-    const prompt = `Based on the following project description, generate a detailed software design document. The document should include sections for: User Stories, System Architecture, UI/UX Flow, and Data Models. Use markdown for formatting.\n\nPROJECT DESCRIPTION:\n${docText}`;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        setDesignDocument(response.text);
-        addLog('UI/UX Architect', 'Generated system design document.');
-    } catch (error) {
-        console.error("Error generating design doc:", error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        setDesignDocument(`### Error\nFailed to generate design document:\n${errorMessage}`);
-        addLog('Error', `Failed to generate design document: ${errorMessage}`);
-    }
-  };
-  
-  const TABS = [
-    { id: 'code', label: 'Code Editor', icon: <CodeBracketIcon /> },
-    { id: 'comms', label: 'Agent Comms', icon: <ChatBubbleLeftRightIcon /> },
-    { id: 'design', label: 'System Design', icon: <DocumentTextIcon /> },
-    { id: 'canvas', label: 'UI Canvas', icon: <SparklesIcon className="w-5 h-5 mr-1" /> },
-    { id: 'review', label: 'Code Review', icon: <CheckCircleIcon /> },
-  ];
-
-  return (
-    <main className="flex-1 flex flex-col bg-gray-900 min-w-0">
-      <div className="flex items-center border-b border-gray-700 bg-gray-800/50">
-        {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id ? 'text-white border-blue-500' : 'text-gray-400 border-transparent hover:text-white hover:bg-gray-800'}`}>
-                {tab.icon}
-                <span className="ml-1">{tab.label}</span>
-            </button>
-        ))}
-        {activeTab === 'code' && activeFile && (
-            <div className="ml-auto flex items-center pr-4">
-                 <button onClick={formatCode} className="flex items-center text-gray-400 hover:text-white transition-colors p-2 rounded-md hover:bg-gray-700">
-                    <WandIcon />
-                    <span className="ml-1 text-sm hidden md:inline">Format</span>
+                <button
+                    onClick={handleCommitClick}
+                    disabled={!commitMessage.trim() || stagedFiles.size === 0}
+                    className="w-full mt-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded-md text-sm"
+                >
+                    Commit {stagedFiles.size > 0 ? `${stagedFiles.size} file(s)`: ''}
                 </button>
             </div>
-        )}
-      </div>
 
-      <div className="flex-grow overflow-y-auto">
-        {activeTab === 'code' && <CodeEditor activeFile={activeFile} onCodeChange={onCodeChange} />}
-        {activeTab === 'comms' && <AgentCommunicationView messages={agentMessages} />}
-        {activeTab === 'design' && <DesignView onProcess={handleGenerateDesign} designDocument={designDocument} />}
-        {activeTab === 'canvas' && <CanvasView addLog={addLog} />}
-        {activeTab === 'review' && <CodeReviewView addLog={addLog} />}
-      </div>
-    </main>
-  );
-};
+            <div className="flex-grow overflow-auto custom-scrollbar p-1 space-y-2">
+                <CollapsibleSection title="Staged Changes" count={stagedFiles.size}>
+                    {[...stagedFiles].sort().map(path => (
+                        <ChangeItem key={path} path={path} onAction={() => onUnstage(path)} actionIcon="-" />
+                    ))}
+                </CollapsibleSection>
 
-const RightPanel = ({ conversation, onSendMessage, logs, files, isFullscreen, onToggleFullscreen }: { conversation: Message[], onSendMessage: (text: string) => Promise<void>, logs: TerminalLog[], files: FileNode[], isFullscreen: boolean, onToggleFullscreen: () => void }) => {
-    const [activeTab, setActiveTab] = useState('preview'); // 'preview', 'terminal'
-    const iframeRef = useRef<HTMLIFrameElement>(null);
-    const terminalEndRef = useRef<HTMLDivElement>(null);
-
-    const getFileContent = useCallback((path: string): string => {
-        const pathParts = path.replace(/^\//, '').split('/');
-        let currentLevel: FileNode[] | undefined = files;
-        let foundNode: FileNode | undefined;
-
-        for (const part of pathParts) {
-            if (!currentLevel) return '';
-            foundNode = currentLevel.find(f => f.name === part);
-            if (!foundNode) return '';
-            currentLevel = foundNode.children;
-        }
-        return foundNode?.content || '';
-    }, [files]);
-    
-    useEffect(() => {
-        if (activeTab === 'preview' && iframeRef.current) {
-            // This is a simplified preview. For a real app, an in-browser bundler/transpiler
-            // would be needed to handle TSX and module imports correctly. For now,
-            // we just display the raw index.html, which may not function fully.
-            iframeRef.current.srcdoc = getFileContent('public/index.html');
-        }
-    }, [files, activeTab, getFileContent]);
-
-    useEffect(() => {
-        terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs]);
-
-    return (
-        <aside className={`bg-gray-800/50 backdrop-blur-sm border-l border-gray-700 w-[500px] flex flex-col shrink-0 ${isFullscreen ? 'hidden' : ''}`}>
-            {/* Top part: Live App Preview + Terminal */}
-            <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center p-2 border-b border-gray-700 bg-gray-800">
-                    <button onClick={() => setActiveTab('preview')} className={`px-3 py-1 text-sm rounded-md ${activeTab === 'preview' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
-                        Live App Preview
-                    </button>
-                    <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1 text-sm rounded-md ml-2 ${activeTab === 'terminal' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
-                        Terminal / Logs
-                    </button>
-                    <div className="ml-auto">
-                         <button onClick={onToggleFullscreen} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md">
-                            <FullscreenEnterIcon />
-                        </button>
-                    </div>
-                </div>
-                <div className="flex-1 overflow-auto bg-gray-900">
-                    {activeTab === 'preview' && (
-                        <iframe ref={iframeRef} title="Live App Preview" className="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-same-origin"></iframe>
-                    )}
-                    {activeTab === 'terminal' && (
-                        <div className="p-2 font-mono text-xs text-gray-300">
-                            {logs.map((log, i) => (
-                                <div key={i} className="flex">
-                                    <span className="text-gray-500 mr-2">{log.time}</span>
-                                    <span className="text-purple-400 font-bold mr-2 w-28 shrink-0">[{log.source}]</span>
-                                    <p className="whitespace-pre-wrap">{log.message}</p>
+                <CollapsibleSection title="Changes" count={unstagedChanges.length}>
+                    {unstagedChanges.sort().map(path => (
+                         <ChangeItem key={path} path={path} onAction={() => onStage(path)} actionIcon="+" />
+                    ))}
+                </CollapsibleSection>
+                
+                <CollapsibleSection title="History" count={commits.length} defaultOpen={false}>
+                    {[...commits].map(commit => (
+                        <div key={commit.id} className="text-xs p-2 border-b border-gray-700/50 last:border-b-0 hover:bg-gray-700/20">
+                            <p className="font-semibold text-gray-200 truncate" title={commit.message}>{commit.message}</p>
+                            <div className="flex items-center justify-between text-gray-400 mt-1">
+                                <div className="flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                    </svg>
+                                    <span>{commit.author}</span>
                                 </div>
-                            ))}
-                            <div ref={terminalEndRef} />
+                                <span>{new Date(commit.date).toLocaleDateString()}</span>
+                            </div>
+                            <div className="flex items-center text-gray-500 mt-1">
+                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                </svg>
+                                <span className="font-mono text-sky-400">{commit.id.substring(0, 7)}</span>
+                            </div>
                         </div>
-                    )}
-                </div>
+                    ))}
+                </CollapsibleSection>
             </div>
-
-            {/* Bottom part: Chat View */}
-            <div className="h-1/2 border-t border-gray-700">
-                <ChatView conversation={conversation} onSendMessage={onSendMessage} />
-            </div>
-        </aside>
+        </div>
     );
 };
 
-const findFileNode = (path: string, nodes: FileNode[]): FileNode | null => {
-    const pathParts = path.replace(/^\//, '').split('/');
-    let currentLevel: FileNode[] | undefined = nodes;
-    let foundNode: FileNode | undefined;
-
-    for (const part of pathParts) {
-        if (!currentLevel) return null;
-        foundNode = currentLevel.find(f => f.name === part);
-        if (!foundNode) return null;
-        if (foundNode.type === 'file' && part !== pathParts[pathParts.length - 1]) return null; // Path goes through a file
-        currentLevel = foundNode.children;
-    }
-    return foundNode || null;
-};
-
-const App = () => {
-    const [files, setFiles] = useState<FileNode[]>(initialFileStructure);
-    const [activeFile, setActiveFile] = useState<FileNode | null>(initialFileStructure[0]?.children?.[0] ?? null);
-    const [agents, setAgents] = useState<Agent[]>(initialAgents);
-    const [conversation, setConversation] = useState<Message[]>(initialConversation);
-    const [logs, setLogs] = useState<TerminalLog[]>(initialTerminalLogs);
-    const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    
-    const addLog = useCallback((source: string, message: string) => {
-        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-        setLogs(prev => [...prev.slice(-100), { time, source, message }]); // Keep last 100 logs
-    }, []);
-
-    const addAgentMessage = useCallback((from: string, message: string) => {
-        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-        const id = Date.now() + Math.random();
-        setAgentMessages(prev => [...prev.slice(-100), { id, time, from, message }]);
-    }, []);
-    
-    const createFileNode = useCallback((path: string, content: string) => {
-        setFiles(prevFiles => {
-            if (findFileNode(path, prevFiles)) {
-                // For simplicity, we'll update if it exists. A more robust system might error.
-                addLog('DevOps Agent', `File ${path} already exists. Overwriting.`);
-                const newFiles = JSON.parse(JSON.stringify(prevFiles));
-                const findAndUpdate = (nodes: FileNode[]) => {
-                    for (const node of nodes) {
-                        if (node.path === path) {
-                            node.content = content;
-                            return true;
-                        }
-                        if (node.children && findAndUpdate(node.children)) {
-                            return true;
-                        }
-                    }
-                    return false;
-                };
-                findAndUpdate(newFiles);
-                return newFiles;
-            }
-
-            const newFiles = JSON.parse(JSON.stringify(prevFiles));
-            const parts = path.split('/').filter(p => p);
-            let currentLevel = newFiles;
-            let currentPath = '';
-
-            for (let i = 0; i < parts.length; i++) {
-                const part = parts[i];
-                currentPath = currentPath ? `${currentPath}/${part}` : part;
-                let node = currentLevel.find((n: FileNode) => n.name === part);
-
-                if (i === parts.length - 1) { // It's the file
-                    const extension = part.split('.').pop() || '';
-                    node = { name: part, type: 'file', path: currentPath, content, extension };
-                    currentLevel.push(node);
-                    currentLevel.sort((a,b) => a.name.localeCompare(b.name));
-                } else { // It's a directory
-                    if (!node) {
-                        node = { name: part, type: 'folder', path: currentPath, children: [] };
-                        currentLevel.push(node);
-                        currentLevel.sort((a,b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
-                    }
-                    if (node.type !== 'folder') {
-                        addLog('Error', `Cannot create file. A file exists where a folder is needed: ${node.path}`);
-                        return prevFiles; // Abort
-                    }
-                    currentLevel = node.children!;
-                }
-            }
-            return newFiles;
-        });
-    }, [addLog]);
-
-    const updateFileContent = useCallback((path: string, newContent: string) => {
-        setFiles(prevFiles => {
-            const newFiles = JSON.parse(JSON.stringify(prevFiles));
-            let found = false;
-            function findAndUpdate(nodes: FileNode[]) {
-                if (found) return;
-                for (let i = 0; i < nodes.length; i++) {
-                    if (nodes[i].path === path) {
-                        nodes[i].content = newContent;
-                        found = true;
-                        return;
-                    }
-                    if (nodes[i].children) {
-                        findAndUpdate(nodes[i].children!);
-                    }
-                }
-            }
-            findAndUpdate(newFiles);
-            return newFiles;
-        });
-
-        setActiveFile(prevActiveFile => {
-            if (prevActiveFile?.path === path) {
-                return { ...prevActiveFile, content: newContent };
-            }
-            return prevActiveFile;
-        });
-    }, []);
-
-    const handleCodeChange = useCallback((newContent: string) => {
-        if (activeFile) {
-            updateFileContent(activeFile.path, newContent);
-        }
-    }, [activeFile, updateFileContent]);
-    
-    const formatCode = useCallback(async () => {
-        if (!activeFile || typeof activeFile.content !== 'string') return;
-
-        let parser: string;
-        switch (activeFile.extension) {
-            case 'html': parser = 'html'; break;
-            case 'json': parser = 'json'; break;
-            case 'tsx':
-            case 'ts':
-            case 'js':
-                parser = 'babel'; break;
-            default:
-                addLog('Editor', `Formatting not supported for .${activeFile.extension} files.`);
-                return;
-        }
-
-        try {
-            const formatted = await prettier.format(activeFile.content, {
-                parser: parser,
-                plugins: [pluginBabel, pluginHtml, pluginEstree],
-                semi: true,
-                singleQuote: true,
-                jsxSingleQuote: false,
-                trailingComma: 'all',
-            });
-            updateFileContent(activeFile.path, formatted);
-            addLog('Editor', `Formatted ${activeFile.name}`);
-        } catch (error) {
-            console.error('Prettier formatting error:', error);
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            addLog('Error', `Failed to format ${activeFile.name}: ${errorMessage}`);
-        }
-    }, [activeFile, addLog, updateFileContent]);
-
-    const handleSendMessage = useCallback(async (text: string) => {
-        const newUserMessage: Message = { from: 'user', text };
-        setConversation(prev => [...prev, newUserMessage]);
-        addLog('User', text);
-        
-        const agentNames = initialAgents.map(a => a.name).join('", "');
-
-        const planSchema = {
-            type: Type.OBJECT,
-            properties: {
-                plan: {
-                    type: Type.ARRAY,
-                    description: "The sequence of development steps.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            agent: { type: Type.STRING, description: "The agent performing the action." },
-                            task: { type: Type.STRING, description: "Short description of the agent's task." },
-                            logMessage: { type: Type.STRING, description: "The message the agent will post to the team log." },
-                            action: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    type: { type: Type.STRING, description: "Action type: 'WAIT', 'CREATE_FILE', 'UPDATE_FILE', or 'SEND_MESSAGE'." },
-                                    duration: { type: Type.INTEGER, description: "Wait duration in ms (for WAIT action)." },
-                                    path: { type: Type.STRING, description: "File path (for file actions)." },
-                                    content: { type: Type.STRING, description: "File content (for file actions). Must be a valid, escaped JSON string." },
-                                    message: { type: Type.STRING, description: "The message content (for SEND_MESSAGE action)." }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
-        const prompt = `You are an AI project orchestrator. A user has requested: "${text}".
-        Generate a JSON object representing a development plan. The plan should be an array of steps.
-        The agents available are: "${agentNames}".
-        The plan MUST include at least one 'SEND_MESSAGE' action for inter-agent communication before any file modifications. For example, the UI/UX Architect can send a message to the Frontend Coder with component details.
-        For file content, generate plausible, simple, and complete code for the request.
-        IMPORTANT: The 'content' field for file actions MUST be a single, valid JSON string. All special characters, including newlines, backslashes, and double quotes, must be properly escaped (e.g., \\n for newlines, \\\\ for backslashes, \\" for quotes).
-        For a WAIT action, use a duration between 1000 and 3000 ms.
-        Respond ONLY with the JSON object that adheres to the schema.`;
-
-        try {
-            addLog('Orchestrator', 'Generating execution plan...');
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: prompt,
-                config: {
-                    responseMimeType: 'application/json',
-                    responseSchema: planSchema,
-                },
-            });
-            
-            // Defensive cleanup to remove potential markdown fences
-            let jsonText = response.text.trim();
-            if (jsonText.startsWith('```json')) {
-                jsonText = jsonText.substring(7).trim();
-            }
-            if (jsonText.endsWith('```')) {
-                jsonText = jsonText.slice(0, -3).trim();
-            }
-
-            const responseJson = JSON.parse(jsonText);
-            const plan = responseJson.plan || [];
-            
-            addLog('Orchestrator', 'Execution plan received. Starting simulation...');
-
-            for (const step of plan) {
-                await new Promise(resolve => setTimeout(resolve, step.action?.duration || 1500));
-
-                setAgents(prev => prev.map(a => 
-                    a.name === step.agent 
-                        ? { ...a, status: 'Active', task: step.task }
-                        : { ...a, status: 'Idle', task: undefined }
-                ));
-                addLog(step.agent, step.logMessage);
-
-                if (step.action?.type === 'CREATE_FILE' && step.action.path && step.action.content) {
-                    createFileNode(step.action.path, step.action.content);
-                } else if (step.action?.type === 'UPDATE_FILE' && step.action.path && step.action.content) {
-                    updateFileContent(step.action.path, step.action.content);
-                } else if (step.action?.type === 'SEND_MESSAGE' && step.agent && step.action.message) {
-                    addAgentMessage(step.agent, step.action.message);
-                }
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            addLog('Orchestrator', 'All tasks completed successfully.');
-            setAgents(prev => prev.map(a => ({ ...a, status: 'Idle', task: undefined })));
-            
-        } catch (error) {
-            console.error("Error during agent execution:", error);
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            addLog('Error', `Failed to execute plan: ${errorMessage}`);
-            setAgents(prev => prev.map(a => ({ ...a, status: 'Idle', task: undefined })));
-        }
-    }, [addLog, createFileNode, updateFileContent, addAgentMessage]);
-
-    const handleToggleFullscreen = useCallback(() => {
-        const doc = window.document;
-        const isCurrentlyFullscreen = doc.fullscreenElement != null;
-
-        if (!isCurrentlyFullscreen) {
-            doc.documentElement.requestFullscreen().catch(err => {
-                alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-            });
-        } else {
-             if (doc.exitFullscreen) {
-                doc.exitFullscreen();
-            }
-        }
-    }, []);
-
-    useEffect(() => {
-        const fullscreenChangeHandler = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-        const keydownHandler = (e: KeyboardEvent) => {
-            if (e.key === 'F11') {
-                e.preventDefault();
-                handleToggleFullscreen();
-            }
-        };
-
-        document.addEventListener('fullscreenchange', fullscreenChangeHandler);
-        document.addEventListener('keydown', keydownHandler);
-
-        return () => {
-            document.removeEventListener('fullscreenchange', fullscreenChangeHandler);
-            document.removeEventListener('keydown', keydownHandler);
-        };
-    }, [handleToggleFullscreen]);
-    
-    const getFileContent = useCallback((path: string): string => {
-        const node = findFileNode(path, files);
-        return node?.content || '';
-    }, [files]);
+const SideBar = ({ files, onSelectFile, selectedFile, onCreateFile, onCreateFolder, ...gitProps }: any) => {
+    const [activeView, setActiveView] = useState('explorer');
 
     return (
-        <div className="grid h-screen w-screen bg-gray-900 text-white font-sans overflow-hidden" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
-            <LeftPanel agents={agents} files={files} onFileSelect={setActiveFile} activeFile={activeFile} />
-            
-            <main className={`flex-1 flex flex-col min-w-0 ${isFullscreen ? 'hidden' : ''}`}>
-                 <CenterPanel activeFile={activeFile} onCodeChange={handleCodeChange} formatCode={formatCode} addLog={addLog} agentMessages={agentMessages} />
-            </main>
-
-            <RightPanel
-                conversation={conversation}
-                onSendMessage={handleSendMessage}
-                logs={logs}
-                files={files}
-                isFullscreen={isFullscreen}
-                onToggleFullscreen={handleToggleFullscreen}
-            />
-
-            {/* Fullscreen Preview Portal */}
-            {isFullscreen && (
-                <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col">
-                     <div className="p-2 bg-gray-800 flex justify-end shrink-0">
-                         <button onClick={handleToggleFullscreen} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md">
-                             <FullscreenExitIcon />
-                         </button>
-                     </div>
-                     <iframe srcDoc={getFileContent('public/index.html')} title="Live App Preview" className="w-full flex-1 border-0 bg-white" sandbox="allow-scripts allow-same-origin"></iframe>
-                </div>
-            )}
+        <div className="bg-gray-800 text-white w-72 flex border-r border-gray-700">
+            <div className="flex flex-col p-1 bg-gray-900 border-r border-gray-700">
+                <button 
+                    onClick={() => setActiveView('explorer')} 
+                    className={`p-2 rounded-md ${activeView === 'explorer' ? 'text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                    title="Project Explorer"
+                >
+                    <ExplorerIcon />
+                </button>
+                <button 
+                    onClick={() => setActiveView('source-control')} 
+                    className={`p-2 rounded-md ${activeView === 'source-control' ? 'text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                    title="Source Control"
+                >
+                    <SourceControlIcon />
+                </button>
+            </div>
+            <div className="flex-grow overflow-hidden">
+                {activeView === 'explorer' ? (
+                    <ProjectExplorer files={files} onSelectFile={onSelectFile} selectedFile={selectedFile} onCreateFile={onCreateFile} onCreateFolder={onCreateFolder} />
+                ) : (
+                    <SourceControlPanel {...gitProps} />
+                )}
+            </div>
         </div>
     );
 }
 
-// Inject styles for custom scrollbar and loading animation
-const style = document.createElement('style');
-style.textContent = `
-    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(107, 114, 128, 0.5); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
+const getOrCreateModel = (path: string, lang: string, value: string) => {
+    const uri = monaco.Uri.parse(path);
+    let model = monaco.editor.getModel(uri);
+    if (model) {
+        if (model.getValue() !== value) {
+            // Push an edit to the model to update it's value
+            // This is better than `setValue` because it preserves undo history
+             model.pushEditOperations(
+                [],
+                [{
+                    range: model.getFullModelRange(),
+                    text: value,
+                }],
+                () => null
+            );
+        }
+    } else {
+        model = monaco.editor.createModel(value, lang, uri);
+    }
+    return model;
+};
+
+const CodeEditor = ({ file, onContentChange }: { file: FileNode, onContentChange: (path: string, content: string) => void }) => {
+    const editorContainerRef = useRef<HTMLDivElement>(null);
+    const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+    const onContentChangeRef = useRef(onContentChange);
+    onContentChangeRef.current = onContentChange;
+
+    const getLanguageFromExtension = useCallback((extension?: string): string => {
+        switch (extension) {
+            case 'js': case 'jsx': return 'javascript';
+            case 'ts': case 'tsx': return 'typescript';
+            case 'json': return 'json';
+            case 'html': return 'html';
+            case 'css': return 'css';
+            case 'gitignore': return 'plaintext';
+            default: return 'plaintext';
+        }
+    }, []);
+
+    // Initialize editor instance
+    useEffect(() => {
+        if (editorContainerRef.current && !editorRef.current) {
+            const editor = monaco.editor.create(editorContainerRef.current, {
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: true },
+                fontSize: 14,
+                wordWrap: 'on',
+                padding: { top: 16 }
+            });
+            editorRef.current = editor;
+
+            editor.onDidChangeModelContent(() => {
+                const model = editor.getModel();
+                if (model && !model.isDisposed()) {
+                    const path = model.uri.path;
+                    const content = model.getValue();
+                    onContentChangeRef.current(path, content);
+                }
+            });
+        }
+        return () => {
+            if (editorRef.current) {
+                editorRef.current.dispose();
+                editorRef.current = null;
+            }
+        };
+    }, []);
+
+    // Handle file changes
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor || !file) return;
+
+        const language = getLanguageFromExtension(file.extension);
+        const model = getOrCreateModel(file.path, language, file.content || '');
+
+        if (editor.getModel() !== model) {
+            editor.setModel(model);
+        }
+    }, [file, getLanguageFromExtension]);
+
+    return (
+        <div className="h-full" ref={editorContainerRef} />
+    );
+};
+
+const findFileByPath = (path: string, nodes: FileNode[]): FileNode | null => {
+    for (const node of nodes) {
+        if (node.path === path) return node;
+        if (node.type === 'folder' && node.children) {
+            const found = findFileByPath(path, node.children);
+            if (found) return found;
+        }
+    }
+    return null;
+};
+
+const PreviewPanel = ({ files }: { files: FileNode[] }) => {
+    const iframeRef = useRef<HTMLIFrameElement>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const generatePreview = async () => {
+            setError(null);
+            try {
+                // 1. Find necessary files
+                const htmlFile = findFileByPath('/public/index.html', files);
+                const cssFile = findFileByPath('/src/styles.css', files);
+                const appFile = findFileByPath('/src/App.tsx', files);
+                const indexFile = findFileByPath('/src/index.tsx', files);
+
+                if (!htmlFile || !appFile || !indexFile) {
+                    setError("Essential files (index.html, App.tsx, index.tsx) not found.");
+                    return;
+                }
+
+                // 2. Transpile TSX/JSX to JS
+                if (!window.Babel) {
+                    setError("Babel is not loaded. Cannot transpile code.");
+                    return;
+                }
+                
+                // A more robust way to clean code for bundling.
+                // Removes all import and export statements from App.tsx.
+                const appContent = (appFile.content || '')
+                    .replace(/^import .*$/gm, '')
+                    .replace(/^export .*$/gm, '');
+
+                // Removes all import statements from index.tsx.
+                const indexContent = (indexFile.content || '')
+                    .replace(/^import .*$/gm, '');
+
+                const combinedJsx = `
+                    (function() {
+                        // Make React and its hooks available in the scope since we removed the imports.
+                        // The global 'React' and 'ReactDOM' are loaded from CDN.
+                        const { useState, useEffect, useCallback, useRef, useMemo, Fragment, StrictMode } = React;
+                        
+                        // --- From App.tsx ---
+                        // The 'App' function/class will be defined here.
+                        ${appContent}
+
+                        // --- From index.tsx ---
+                        // This part will call ReactDOM.createRoot and .render.
+                        // It assumes 'App' is defined from above and 'ReactDOM' is a global.
+                        ${indexContent}
+                    })();
+                `;
+
+                const { code: transpiledCode } = window.Babel.transform(combinedJsx, {
+                    presets: ["react", "typescript"],
+                    filename: 'bundle.tsx'
+                });
+
+
+                // 3. Construct the final HTML for the iframe
+                const finalHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8" />
+                        <title>Preview</title>
+                        <style>
+                            ${cssFile?.content || ''}
+                        </style>
+                    </head>
+                    <body>
+                        ${htmlFile.content}
+                        
+                        <!-- React CDN -->
+                        <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+                        <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+                        
+                        <!-- Transpiled App Code -->
+                        <script type="text/javascript">
+                            try {
+                                ${transpiledCode}
+                            } catch (e) {
+                                const root = document.getElementById('root') || document.body;
+                                root.innerHTML = '<div style="color: #ff5555; background-color: #220000; padding: 1rem; font-family: monospace;"><h3>Runtime Error</h3><pre>' + e.stack + '</pre></div>';
+                                console.error(e);
+                            }
+                        </script>
+                    </body>
+                    </html>
+                `;
+
+                // 4. Update iframe
+                const iframe = iframeRef.current;
+                if (iframe) {
+                    iframe.srcdoc = finalHtml;
+                }
+
+            } catch (e: any) {
+                console.error("Preview generation error:", e);
+                const escapedMessage = e.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const errorMessage = `
+                    <div style="color: #ff5555; background-color: #220000; padding: 1rem; font-family: monospace; font-size: 14px; white-space: pre-wrap; height: 100vh; box-sizing: border-box;">
+                        <h3 style="margin-top: 0; margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid #552222; padding-bottom: 0.5rem;">Build Error</h3>
+                        ${e.loc ? `<p style="margin: 0 0 1rem 0; color: #ff9999;"><strong>Location:</strong> Line ${e.loc.line}, Column ${e.loc.column}</p>` : ''}
+                        <code style="display: block;">${escapedMessage}</code>
+                    </div>
+                `;
+                setError(e.message);
+                const iframe = iframeRef.current;
+                if (iframe) {
+                  iframe.srcdoc = errorMessage;
+                }
+            }
+        };
+
+        const timeoutId = setTimeout(generatePreview, 500); // Debounce
+        return () => clearTimeout(timeoutId);
+
+    }, [files]);
+
+    return (
+        <div className="h-full w-full bg-white">
+            <iframe
+                ref={iframeRef}
+                title="Live Preview"
+                className="w-full h-full border-0"
+                sandbox="allow-scripts allow-same-origin"
+            />
+        </div>
+    );
+};
+
+const MainPanel = ({ selectedFile, onFileContentChange, files, onFormatFile }: { selectedFile: FileNode | null; onFileContentChange: (path: string, content: string) => void, files: FileNode[], onFormatFile: () => void }) => {
+    const [view, setView] = useState<'editor' | 'preview'>('editor');
+    const isFormattable = selectedFile && ['js', 'jsx', 'ts', 'tsx', 'css'].includes(selectedFile.extension || '');
+
+    const renderEditor = () => {
+        if (!selectedFile) {
+            return (
+                <div className="flex-grow flex items-center justify-center">
+                    <div className="text-center text-gray-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-3H8" /></svg>
+                        <h3 className="mt-2 text-sm font-medium">Select a file</h3>
+                        <p className="mt-1 text-sm">Choose a file from the explorer to begin editing.</p>
+                    </div>
+                </div>
+            );
+        }
+        return <CodeEditor file={selectedFile} onContentChange={onFileContentChange} />;
+    };
+
+    return (
+        <div className="bg-gray-900 text-white flex-grow flex flex-col">
+            <div className="flex items-center justify-between p-2 bg-gray-800 border-b border-gray-700 shrink-0">
+                <div className="flex items-center min-w-0">
+                    {view === 'editor' && selectedFile ? (
+                        <>
+                            <FileIcon extension={selectedFile.extension} name={selectedFile.name} />
+                            <span className="font-mono text-sm truncate">{selectedFile.path}</span>
+                            {isFormattable && (
+                                <button onClick={onFormatFile} className="ml-4 text-gray-400 hover:text-white p-1 rounded-md hover:bg-gray-700" title="Format Code">
+                                    <FormatCodeIcon />
+                                </button>
+                            )}
+                        </>
+                    ) : view === 'preview' ? (
+                        <span className="font-semibold text-sm">Live Preview</span>
+                    ) : null }
+                </div>
+                <div className="flex items-center bg-gray-900 rounded-md p-0.5">
+                    <button onClick={() => setView('editor')} className={`px-2 py-0.5 text-xs rounded-sm transition-colors ${view === 'editor' ? 'bg-blue-600' : 'hover:bg-gray-700'}`}>Editor</button>
+                    <button onClick={() => setView('preview')} className={`px-2 py-0.5 text-xs rounded-sm transition-colors ${view === 'preview' ? 'bg-blue-600' : 'hover:bg-gray-700'}`}>Preview</button>
+                </div>
+            </div>
+            <div className="flex-grow overflow-hidden bg-[#1e1e1e]">
+                {view === 'editor' ? renderEditor() : <PreviewPanel files={files} />}
+            </div>
+        </div>
+    );
+};
+
+
+const RightPanel = ({ agents }: { agents: Agent[] }) => {
+    return (
+        <div className="bg-gray-800 text-white w-72 flex flex-col p-2 border-l border-gray-700">
+            <h2 className="text-lg font-semibold mb-2 px-2">Agent Status</h2>
+            <div className="space-y-2">
+                {agents.map(agent => (
+                    <div key={agent.name} className="bg-gray-700 p-2 rounded-md transition-all duration-300">
+                        <div className="flex items-center justify-between">
+                            <span className="font-bold">{agent.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${agent.status === 'Active' ? 'bg-green-500 text-black animate-pulse' : 'bg-gray-500 text-white'}`}>{agent.status}</span>
+                        </div>
+                        {agent.task && <p className="text-xs text-gray-300 mt-1 truncate" title={agent.task}>{agent.task}</p>}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const BottomPanel = ({ terminalLogs, agentMessages }: { terminalLogs: TerminalLog[], agentMessages: AgentMessage[] }) => {
+    const [activeTab, setActiveTab] = useState('agentComms');
+    const logsEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [terminalLogs, agentMessages]);
+
+    const tabs = [
+        { id: 'terminal', name: 'Terminal' },
+        { id: 'agentComms', name: 'Agent Comms' },
+        { id: 'debug', name: 'Debug Console' },
+    ];
+
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'terminal':
+                return (
+                    <div className="p-2 font-mono text-xs overflow-auto h-full custom-scrollbar">
+                        {terminalLogs.map(log => (
+                           <div key={log.id}>
+                                <span className="text-gray-500 mr-2">{log.time}</span>
+                                <span className="text-cyan-400 mr-2">[{log.source}]</span>
+                                <span>{log.message}</span>
+                           </div>
+                        ))}
+                         <div ref={logsEndRef} />
+                    </div>
+                );
+            case 'agentComms':
+                return (
+                    <div className="p-2 space-y-2 overflow-auto h-full custom-scrollbar">
+                        {agentMessages.map(msg => (
+                            <div key={msg.id} className="text-xs">
+                                <span className="text-gray-500 mr-2">{msg.time}</span>
+                                <span className="font-bold text-yellow-400 mr-2">&lt;{msg.from}&gt;</span>
+                                <span className="text-gray-200 whitespace-pre-wrap">{msg.message}</span>
+                            </div>
+                        ))}
+                         <div ref={logsEndRef} />
+                    </div>
+                );
+            case 'debug':
+                return <div className="p-2 text-gray-400 text-sm">Debug console is empty.</div>;
+            default: return null;
+        }
+    }
+
+    return (
+        <div className="bg-gray-800 text-white flex flex-col border-t border-gray-700 h-64">
+             <div className="flex border-b border-gray-700">
+                {tabs.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`px-4 py-2 text-sm font-medium ${activeTab === tab.id ? 'bg-gray-900 border-b-2 border-blue-500 text-white' : 'text-gray-400 hover:bg-gray-700'}`}
+                    >
+                        {tab.name}
+                    </button>
+                ))}
+            </div>
+            <div className="flex-grow bg-gray-900 overflow-hidden">
+                {renderContent()}
+            </div>
+        </div>
+    );
+};
+
+const ChatPanel = ({ onSendMessage, loading }: { onSendMessage: (msg: string) => Promise<void>, loading: boolean }) => {
+    const [input, setInput] = useState('');
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     
-    .dot-flashing { position: relative; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite linear alternate; animation-delay: 0.5s; }
-    .dot-flashing::before, .dot-flashing::after { content: ''; display: inline-block; position: absolute; top: 0; }
-    .dot-flashing::before { left: -10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite alternate; animation-delay: 0s; }
-    .dot-flashing::after { left: 10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite alternate; animation-delay: 1s; }
-    @keyframes dot-flashing { 0% { background-color: #9880ff; } 50%, 100% { background-color: rgba(152, 128, 255, 0.2); } }
+    const handleSend = () => {
+        if (input.trim() && !loading) {
+            onSendMessage(input.trim());
+            setInput('');
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
+    };
+    
+    useEffect(() => {
+        const el = textareaRef.current;
+        if (el) {
+            el.style.height = 'auto';
+            el.style.height = `${el.scrollHeight}px`;
+        }
+    }, [input]);
+
+    return (
+        <div className="p-4 border-t border-gray-700 bg-gray-800">
+             <div className="relative bg-gray-900 border border-gray-600 rounded-lg">
+                <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Provide instructions to the AI agents..."
+                    className="w-full bg-transparent p-3 pr-20 text-white rounded-lg focus:outline-none resize-none custom-scrollbar"
+                    rows={1}
+                    style={{maxHeight: '200px'}}
+                    disabled={loading}
+                />
+                <button
+                    onClick={handleSend}
+                    disabled={loading || !input.trim()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white p-2 rounded-full"
+                    aria-label="Send message"
+                >
+                    {loading ? (
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.428A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+                    )}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const Header = () => (
+    <header className="bg-gray-900 text-white p-3 flex items-center border-b border-gray-700 shadow-md">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-400 mr-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" /></svg>
+        <h1 className="text-xl font-bold">Agentic - AI Development Environment</h1>
+    </header>
+);
+
+const StatusBar = ({ branch, changesCount }: { branch: string, changesCount: number }) => {
+    return (
+        <div className="bg-gray-900 text-white flex items-center px-2 py-1 border-t border-gray-700 text-xs font-mono">
+            <div className="flex items-center" title="Current Branch">
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 20.5V15.5C11 13.0147 8.98528 11 6.5 11C4.01472 11 2 13.0147 2 15.5V20.5M11 3.5V8.5C11 10.9853 8.98528 13 6.5 13H2" />
+                </svg>
+                <span>{branch}</span>
+            </div>
+            {changesCount > 0 && (
+                <div className="flex items-center ml-4" title={`${changesCount} unstaged changes`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <span>{changesCount}</span>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const App = () => {
+    // Core state
+    const [files, setFiles] = useState<FileNode[]>(initialFiles);
+    const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
+    const [agents, setAgents] = useState<Agent[]>(initialAgents);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([]);
+    const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    
+    // Git state
+    const [isRepoInitialized, setIsRepoInitialized] = useState(false);
+    const [committedFiles, setCommittedFiles] = useState<FileNode[]>([]);
+    const [stagedFiles, setStagedFiles] = useState<Set<string>>(new Set());
+    const [commits, setCommits] = useState<Commit[]>([]);
+    const [currentBranch] = useState('main');
+    
+    const ai = useMemo(() => {
+        if (!process.env.API_KEY) {
+          console.error("API_KEY environment variable not set.");
+          return null;
+        }
+        return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }, []);
+
+    // --- LOGGING ---
+    const addTerminalLog = (source: string, message: string) => {
+        setTerminalLogs(prev => [...prev, { id: prev.length, time: new Date().toLocaleTimeString(), source, message }]);
+    };
+    
+    const addAgentMessage = (from: string, message: string) => {
+        setAgentMessages(prev => [...prev, { id: prev.length, time: new Date().toLocaleTimeString(), from, message }]);
+    };
+    
+    // --- FILE SYSTEM UTILS ---
+    const updateFileContent = async (path: string, content: string) => {
+        const fileNode = findFileByPath(path, files);
+        let finalContent = content;
+
+        if (fileNode && fileNode.extension && ['js', 'ts', 'tsx', 'jsx', 'css'].includes(fileNode.extension)) {
+            finalContent = await formatCodeWithPrettier(content, fileNode.extension);
+        }
+
+        setFiles(prevFiles => {
+            const newFiles = JSON.parse(JSON.stringify(prevFiles));
+            const file = findFileByPath(path, newFiles);
+            if (file && file.type === 'file') {
+                file.content = finalContent;
+                if (selectedFile?.path === path) {
+                    setSelectedFile(prev => prev ? { ...prev, content: finalContent } : null);
+                }
+            }
+            return newFiles;
+        });
+    };
+    
+    const handleFileContentChange = (path: string, content: string) => {
+        const currentFile = findFileByPath(path, files);
+        if (currentFile && currentFile.content === content) {
+            return; // No change, prevent re-render
+        }
+
+        setFiles(prevFiles => {
+            const newFiles = JSON.parse(JSON.stringify(prevFiles));
+            const file = findFileByPath(path, newFiles);
+            if (file && file.type === 'file') {
+                file.content = content;
+                if (selectedFile?.path === path) {
+                    setSelectedFile(prev => prev ? { ...prev, content: content } : null);
+                }
+            }
+            return newFiles;
+        });
+    };
+
+    const handleCreateFile = (filename: string) => {
+        if (!filename.trim()) {
+            alert("File name cannot be empty.");
+            return;
+        }
+        const newPath = `/${filename}`;
+        if (files.some(file => file.path === newPath)) {
+            alert(`File "${filename}" already exists.`);
+            return;
+        }
+        const parts = filename.split('.');
+        const extension = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        const newFile: FileNode = { name: filename, type: 'file', path: newPath, content: '', extension: extension };
+        setFiles(prevFiles => [...prevFiles, newFile]);
+        setSelectedFile(newFile);
+    };
+
+    const handleCreateFolder = (folderName: string) => {
+        if (!folderName.trim()) {
+            alert("Folder name cannot be empty.");
+            return;
+        }
+        const newPath = `/${folderName}`;
+        if (files.some(file => file.path === newPath)) {
+            alert(`A folder or file named "${folderName}" already exists at the root.`);
+            return;
+        }
+        // Basic validation for invalid characters
+        if (/[\\/:*?"<>|]/.test(folderName)) {
+            alert("Folder name contains invalid characters.");
+            return;
+        }
+        const newFolder: FileNode = { name: folderName, type: 'folder', path: newPath, children: [] };
+        setFiles(prevFiles => [...prevFiles, newFolder]);
+    };
+
+    const handleFormatCurrentFile = async () => {
+        if (!selectedFile) return;
+        await updateFileContent(selectedFile.path, selectedFile.content || '');
+    };
+    
+    // --- GIT LOGIC ---
+    const gitStatus = useMemo(() => {
+        if (!isRepoInitialized) return { modified: [], untracked: [], total: 0 };
+
+        const committedFileMap = new Map<string, string>(); // path -> content
+        const flatten = (nodes: FileNode[], map: Map<string, string>) => {
+            for (const node of nodes) {
+                if (node.type === 'file') map.set(node.path, node.content || '');
+                if (node.children) flatten(node.children, map);
+            }
+        };
+        flatten(committedFiles, committedFileMap);
+
+        const modified: string[] = [];
+        const untracked: string[] = [];
+        
+        const checkChanges = (nodes: FileNode[]) => {
+            for (const node of nodes) {
+                if(node.type === 'file') {
+                    const committedContent = committedFileMap.get(node.path);
+                    if (committedContent !== undefined) {
+                        if (committedContent !== node.content) {
+                            modified.push(node.path);
+                        }
+                    } else {
+                        untracked.push(node.path);
+                    }
+                }
+                if (node.children) checkChanges(node.children);
+            }
+        }
+        checkChanges(files);
+        
+        return { modified, untracked, total: modified.length + untracked.length };
+    }, [files, committedFiles, isRepoInitialized]);
+
+    const handleInitializeRepo = () => {
+        const initialCommit: Commit = {
+            id: Math.random().toString(36).substring(2, 15),
+            message: 'Initial commit',
+            author: 'System',
+            date: new Date().toISOString(),
+        };
+        const filesCopy = JSON.parse(JSON.stringify(files));
+        setCommittedFiles(filesCopy);
+        setCommits([initialCommit]);
+        setIsRepoInitialized(true);
+        addTerminalLog('Git', 'Initialized empty Git repository.');
+    };
+
+    const handleStage = (path: string) => {
+        setStagedFiles(prev => new Set(prev).add(path));
+    };
+
+    const handleUnstage = (path: string) => {
+        setStagedFiles(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(path);
+            return newSet;
+        });
+    };
+
+    const handleCommit = (message: string) => {
+        if (stagedFiles.size === 0) return;
+
+        const newCommit: Commit = {
+            id: Math.random().toString(36).substring(2, 15),
+            message,
+            author: 'User',
+            date: new Date().toISOString(),
+        };
+
+        setCommits(prev => [newCommit, ...prev]);
+        setCommittedFiles(JSON.parse(JSON.stringify(files)));
+        setStagedFiles(new Set());
+        addTerminalLog('Git', `Committed ${stagedFiles.size} changes.`);
+    };
+
+
+    // --- AGENT/AI LOGIC ---
+    const updateAgentStatus = useCallback((agentName: string, status: 'Active' | 'Idle', task?: string) => {
+        setAgents(prevAgents =>
+            prevAgents.map(agent =>
+                agent.name === agentName ? { ...agent, status, task: task || (status === 'Idle' ? undefined : agent.task) } : agent
+            )
+        );
+    }, []);
+
+    const executePlan = async (plan: any[]) => {
+        const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+        updateAgentStatus('Orchestrator', 'Active', 'Executing generated plan...');
+        await delay(500);
+        addAgentMessage('Orchestrator', 'Starting plan execution.');
+        updateAgentStatus('Orchestrator', 'Idle');
+        await delay(500);
+
+        for (const step of plan) {
+            addTerminalLog('Executor', `Executing action: ${step.action}`);
+            
+            let agentName = 'Orchestrator';
+            let taskDescription = '';
+
+            if (step.action === 'SEND_MESSAGE') {
+                agentName = step.args.from || 'Orchestrator';
+                taskDescription = `Sending message: "${(step.args.message || '').substring(0, 50)}..."`;
+            } else if (step.action === 'WRITE_FILE') {
+                agentName = step.args.path.match(/\.(tsx|css|html)$/) ? 'Frontend-Dev' : 'Backend-Dev';
+                taskDescription = `Writing to file: ${step.args.path}`;
+            } else if (step.action === 'READ_FILE') {
+                agentName = 'Orchestrator';
+                taskDescription = `Reading file: ${step.args.path}`;
+            }
+
+            updateAgentStatus(agentName, 'Active', taskDescription);
+            await delay(1000 + Math.random() * 1000);
+
+            switch (step.action) {
+                case 'SEND_MESSAGE':
+                    if (step.args.from && step.args.message) {
+                        addAgentMessage(step.args.from, step.args.message);
+                    }
+                    break;
+                case 'WRITE_FILE':
+                    if (step.args.path && typeof step.args.content === 'string') {
+                        await updateFileContent(step.args.path, step.args.content);
+                        addAgentMessage(agentName, `Updated ${step.args.path}.`);
+                    }
+                    break;
+                case 'READ_FILE':
+                    addAgentMessage(agentName, `Read file ${step.args.path}. Acknowledged content.`);
+                    break;
+                default:
+                     addAgentMessage('System', `Unknown action: ${step.action}`);
+            }
+
+            updateAgentStatus(agentName, 'Idle');
+            await delay(500);
+        }
+
+        updateAgentStatus('Orchestrator', 'Active', 'Finalizing plan execution.');
+        await delay(500);
+        addAgentMessage('Orchestrator', 'Plan execution complete. Awaiting next instructions.');
+        updateAgentStatus('Orchestrator', 'Idle');
+    };
+
+    const handleSendMessage = async (userMessage: string) => {
+        if (!ai) {
+             setMessages(prev => [...prev, { id: prev.length, sender: 'system', content: '', error: 'Gemini API key not configured.' }]);
+             return;
+        }
+        setIsLoading(true);
+        addTerminalLog('User', `Sending message: ${userMessage}`);
+        setMessages(prev => [...prev, { id: prev.length, sender: 'user', content: userMessage }]);
+        
+        const fileStructure = JSON.stringify(files, (key, value) => key === 'content' ? undefined : value, 2);
+        
+        const systemInstruction = `You are the vigilant guardian of the software delivery pipeline, ensuring seamless transitions from code to production with unyielding precision and efficiency. You are the automated backbone of reliable release cycles.
+
+Your personality is:
+- Precise: Every detail matters; accuracy is paramount.
+- Reliable: You execute tasks consistently and correctly.
+- Efficient: You streamline processes and seek the most direct path.
+- Proactive: You anticipate potential issues.
+- Methodical: You adhere strictly to established procedures.
+- Solution-Oriented: You focus on resolving challenges quickly.
+
+Your communication style is direct, factual, concise, and professional. You use technical DevOps terminology (e.g., CI/CD, artifact, rollback, containerization, staging, production, etc.).
+
+Your core directives are:
+- Ensure all software deployments and file modifications are executed flawlessly.
+- Automate and optimize the CI/CD pipeline and development workflow.
+- Proactively monitor for potential issues.
+- Provide real-time, accurate status updates on your plan.
+- Facilitate rapid, controlled rollbacks or fixes if needed.`;
+
+        const userPrompt = `Your goal is to fulfill the user's request by creating a plan of actions for your agent team.
+
+User Request: "${userMessage}"
+
+Current file structure:
+${fileStructure}
+
+Currently open file: ${selectedFile ? `path: ${selectedFile.path}\\ncontent:\\n${selectedFile.content}` : 'None'}
+
+Your task is to generate a JSON object representing a plan of actions. 
+The plan should be an array of action objects.
+
+Available actions:
+1.  READ_FILE: Reads the content of a file.
+    - args: { "path": "/path/to/file.ext" }
+2.  WRITE_FILE: Writes content to a file. If the file doesn't exist, it will be created.
+    - args: { "path": "/path/to/file.ext", "content": "file content here" }
+3.  SEND_MESSAGE: An agent sends a message to another agent or to the team. THIS IS REQUIRED before writing code to discuss the plan.
+    - args: { "from": "AgentName", "message": "The message content." }
+4.  ask_user_for_clarification: Ask the user a question if the request is ambiguous.
+    - args: { "question": "Your question for the user." }
+
+IMPORTANT:
+- The response MUST be a single JSON object. Do not include any other text, markdown, or explanations.
+- The root of the object must be a "plan" key containing an array of actions.
+- All file content in the 'content' field of WRITE_FILE actions MUST be a valid single-line JSON string. This means all newlines, quotes, and other special characters MUST be properly escaped (e.g., use \\n for newlines, \\" for quotes).
+
+Example response:
+{
+  "plan": [
+    {
+      "action": "SEND_MESSAGE",
+      "args": {
+        "from": "Orchestrator",
+        "message": "Acknowledged. User requests a new button. Frontend-Dev, please implement in App.tsx."
+      }
+    },
+    {
+      "action": "WRITE_FILE",
+      "args": {
+        "path": "/src/App.tsx",
+        "content": "import React from 'react';\\n\\nconst App = () => {\\n  return <button>New Button</button>;\\n};\\n\\nexport default App;"
+      }
+    }
+  ]
+}
 `;
-document.head.appendChild(style);
+
+        try {
+            const result = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: userPrompt,
+                config: {
+                    systemInstruction,
+                }
+            });
+            const textResponse = result.text.trim();
+            const cleanedResponse = textResponse.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+            
+            addTerminalLog('Gemini', 'Received plan response.');
+            
+            const parsed = JSON.parse(cleanedResponse);
+
+            if (parsed.plan && Array.isArray(parsed.plan)) {
+                setMessages(prev => [...prev, { id: prev.length, sender: 'ai', content: `Received a plan with ${parsed.plan.length} steps.`, plan: parsed.plan }]);
+                await executePlan(parsed.plan);
+            } else {
+                throw new Error("Invalid plan structure in response.");
+            }
+        } catch (error: any) {
+             console.error("Error during agent execution:", error);
+             addTerminalLog('Error', `Execution failed: ${error.message}`);
+             setMessages(prev => [...prev, { id: prev.length, sender: 'system', content: '', error: `Error during agent execution:\n${error.toString()}` }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const gitProps = {
+        isRepoInitialized,
+        onInitializeRepo: handleInitializeRepo,
+        gitStatus,
+        stagedFiles,
+        onStage: handleStage,
+        onUnstage: handleUnstage,
+        onCommit: handleCommit,
+        commits,
+    };
+
+    return (
+      <div className="bg-gray-900 text-white h-screen w-screen flex flex-col font-sans">
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+            `}</style>
+            <Header />
+            <div className="flex flex-grow overflow-hidden">
+                <SideBar
+                    files={files}
+                    onSelectFile={setSelectedFile}
+                    selectedFile={selectedFile}
+                    onCreateFile={handleCreateFile}
+                    onCreateFolder={handleCreateFolder}
+                    {...gitProps}
+                />
+                <div className="flex flex-col flex-grow">
+                    <div className="flex flex-col flex-grow overflow-hidden">
+                        <div className="flex-grow overflow-hidden">
+                          <MainPanel 
+                              selectedFile={selectedFile} 
+                              onFileContentChange={handleFileContentChange} 
+                              files={files}
+                              onFormatFile={handleFormatCurrentFile}
+                          />
+                        </div>
+                        {isRepoInitialized && <StatusBar branch={currentBranch} changesCount={gitStatus.total - stagedFiles.size} />}
+                    </div>
+                     <ChatPanel onSendMessage={handleSendMessage} loading={isLoading} />
+                </div>
+                 <RightPanel agents={agents} />
+            </div>
+            <BottomPanel terminalLogs={terminalLogs} agentMessages={agentMessages} />
+        </div>
+    );
+};
 
 export default App;
