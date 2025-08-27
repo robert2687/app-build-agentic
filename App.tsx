@@ -2,6 +2,67 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 
+// --- ERROR BOUNDARY ---
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+const ErrorIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-red-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+);
+
+const FallbackComponent = ({ error }: { error: Error | null }) => (
+    <div className="bg-gray-900 text-white h-screen w-screen flex items-center justify-center font-sans">
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-8 max-w-lg text-center shadow-2xl">
+            <ErrorIcon />
+            <h1 className="text-3xl font-bold text-red-400 mb-2">Something went wrong.</h1>
+            <p className="text-gray-400 mb-6">An unexpected error occurred. Please try refreshing the application.</p>
+            {error && (
+                <pre className="bg-gray-900 text-left p-4 rounded-md text-sm text-red-300 overflow-auto mb-6 custom-scrollbar">
+                    <code>{error.toString()}</code>
+                </pre>
+            )}
+            <button
+                onClick={() => window.location.reload()}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-6 rounded-md transition-colors"
+            >
+                Refresh Page
+            </button>
+        </div>
+    </div>
+);
+
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <FallbackComponent error={this.state.error} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+
 // --- TYPES ---
 interface FileNode {
   name: string;
@@ -838,6 +899,21 @@ const RightPanel = ({ conversation, onSendMessage, logs, files, isFullscreen, on
     );
 };
 
+const findFileNode = (path: string, nodes: FileNode[]): FileNode | null => {
+    const pathParts = path.replace(/^\//, '').split('/');
+    let currentLevel: FileNode[] | undefined = nodes;
+    let foundNode: FileNode | undefined;
+
+    for (const part of pathParts) {
+        if (!currentLevel) return null;
+        foundNode = currentLevel.find(f => f.name === part);
+        if (!foundNode) return null;
+        if (foundNode.type === 'file' && part !== pathParts[pathParts.length - 1]) return null; // Path goes through a file
+        currentLevel = foundNode.children;
+    }
+    return foundNode || null;
+};
+
 const App = () => {
     const [files, setFiles] = useState<FileNode[]>(initialFileStructure);
     const [activeFile, setActiveFile] = useState<FileNode | null>(initialFileStructure[0]?.children?.[0] ?? null);
@@ -850,11 +926,64 @@ const App = () => {
         const time = new Date().toLocaleTimeString('en-US', { hour12: false });
         setLogs(prev => [...prev.slice(-100), { time, source, message }]); // Keep last 100 logs
     }, []);
+    
+    const createFileNode = useCallback((path: string, content: string) => {
+        setFiles(prevFiles => {
+            if (findFileNode(path, prevFiles)) {
+                // For simplicity, we'll update if it exists. A more robust system might error.
+                addLog('DevOps Agent', `File ${path} already exists. Overwriting.`);
+                const newFiles = JSON.parse(JSON.stringify(prevFiles));
+                const findAndUpdate = (nodes: FileNode[]) => {
+                    for (const node of nodes) {
+                        if (node.path === path) {
+                            node.content = content;
+                            return true;
+                        }
+                        if (node.children && findAndUpdate(node.children)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                findAndUpdate(newFiles);
+                return newFiles;
+            }
+
+            const newFiles = JSON.parse(JSON.stringify(prevFiles));
+            const parts = path.split('/').filter(p => p);
+            let currentLevel = newFiles;
+            let currentPath = '';
+
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                currentPath = currentPath ? `${currentPath}/${part}` : part;
+                let node = currentLevel.find((n: FileNode) => n.name === part);
+
+                if (i === parts.length - 1) { // It's the file
+                    const extension = part.split('.').pop() || '';
+                    node = { name: part, type: 'file', path: currentPath, content, extension };
+                    currentLevel.push(node);
+                    currentLevel.sort((a,b) => a.name.localeCompare(b.name));
+                } else { // It's a directory
+                    if (!node) {
+                        node = { name: part, type: 'folder', path: currentPath, children: [] };
+                        currentLevel.push(node);
+                        currentLevel.sort((a,b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+                    }
+                    if (node.type !== 'folder') {
+                        addLog('Error', `Cannot create file. A file exists where a folder is needed: ${node.path}`);
+                        return prevFiles; // Abort
+                    }
+                    currentLevel = node.children!;
+                }
+            }
+            return newFiles;
+        });
+    }, [addLog]);
 
     const updateFileContent = useCallback((path: string, newContent: string) => {
         setFiles(prevFiles => {
             const newFiles = JSON.parse(JSON.stringify(prevFiles));
-            
             let found = false;
             function findAndUpdate(nodes: FileNode[]) {
                 if (found) return;
@@ -869,7 +998,6 @@ const App = () => {
                     }
                 }
             }
-    
             findAndUpdate(newFiles);
             return newFiles;
         });
@@ -931,17 +1059,92 @@ const App = () => {
         }
     }, [activeFile, addLog, updateFileContent]);
 
-    const handleSendMessage = async (text: string) => {
+    const handleSendMessage = useCallback(async (text: string) => {
         const newUserMessage: Message = { from: 'user', text };
         setConversation(prev => [...prev, newUserMessage]);
         addLog('User', text);
         
-        const aiResponse: Message = { from: 'ai', text: "I have received your instruction. My team and I will get to work." };
-        setTimeout(() => {
-            setConversation(prev => [...prev, aiResponse]);
-            addLog('Orchestrator', aiResponse.text);
-        }, 1000);
-    };
+        const agentNames = initialAgents.map(a => a.name).join('", "');
+
+        const planSchema = {
+            type: Type.OBJECT,
+            properties: {
+                plan: {
+                    type: Type.ARRAY,
+                    description: "The sequence of development steps.",
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            agent: { type: Type.STRING, description: "The agent performing the action." },
+                            task: { type: Type.STRING, description: "Short description of the agent's task." },
+                            logMessage: { type: Type.STRING, description: "The message the agent will post to the team log." },
+                            action: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    type: { type: Type.STRING, description: "Action type: 'WAIT', 'CREATE_FILE', or 'UPDATE_FILE'." },
+                                    duration: { type: Type.INTEGER, description: "Wait duration in ms (for WAIT action)." },
+                                    path: { type: Type.STRING, description: "File path (for file actions)." },
+                                    content: { type: Type.STRING, description: "File content (for file actions)." }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        const prompt = `You are an AI project orchestrator. A user has requested: "${text}".
+        Generate a JSON object representing a development plan. The plan should be an array of steps.
+        The agents available are: "${agentNames}".
+        The development plan should be a logical sequence. For a new UI component, the flow is typically: Requirements Analyst -> UI/UX Architect -> Frontend Coder -> QA & Security Agent.
+        For file content, generate plausible, simple, and complete code for the request.
+        For a WAIT action, use a duration between 1000 and 3000 ms.
+        Respond ONLY with the JSON object that adheres to the schema.`;
+
+        try {
+            addLog('Orchestrator', 'Generating execution plan...');
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: planSchema,
+                },
+            });
+            
+            const responseJson = JSON.parse(response.text);
+            const plan = responseJson.plan || [];
+            
+            addLog('Orchestrator', 'Execution plan received. Starting simulation...');
+
+            for (const step of plan) {
+                await new Promise(resolve => setTimeout(resolve, step.action?.duration || 1500));
+
+                setAgents(prev => prev.map(a => 
+                    a.name === step.agent 
+                        ? { ...a, status: 'Active', task: step.task }
+                        : { ...a, status: 'Idle', task: undefined }
+                ));
+                addLog(step.agent, step.logMessage);
+
+                if (step.action?.type === 'CREATE_FILE' && step.action.path && step.action.content) {
+                    createFileNode(step.action.path, step.action.content);
+                } else if (step.action?.type === 'UPDATE_FILE' && step.action.path && step.action.content) {
+                    updateFileContent(step.action.path, step.action.content);
+                }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            addLog('Orchestrator', 'All tasks completed successfully.');
+            setAgents(prev => prev.map(a => ({ ...a, status: 'Idle', task: undefined })));
+            
+        } catch (error) {
+            console.error("Error during agent execution:", error);
+            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+            addLog('Error', `Failed to execute plan: ${errorMessage}`);
+            setAgents(prev => prev.map(a => ({ ...a, status: 'Idle', task: undefined })));
+        }
+    }, [addLog, createFileNode, updateFileContent]);
 
     const handleToggleFullscreen = useCallback(() => {
         const doc = window.document;
@@ -979,17 +1182,8 @@ const App = () => {
     }, [handleToggleFullscreen]);
     
     const getFileContent = useCallback((path: string): string => {
-        const pathParts = path.replace(/^\//, '').split('/');
-        let currentLevel: FileNode[] | undefined = files;
-        let foundNode: FileNode | undefined;
-
-        for (const part of pathParts) {
-            if (!currentLevel) return '';
-            foundNode = currentLevel.find(f => f.name === part);
-            if (!foundNode) return '';
-            currentLevel = foundNode.children;
-        }
-        return foundNode?.content || '';
+        const node = findFileNode(path, files);
+        return node?.content || '';
     }, [files]);
 
     return (
