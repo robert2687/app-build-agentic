@@ -103,6 +103,13 @@ interface TerminalLog {
     message: string;
 }
 
+interface AgentMessage {
+    id: number;
+    time: string;
+    from: string;
+    message: string;
+}
+
 // --- ICONS (as stateless functional components) ---
 const FolderIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -176,6 +183,12 @@ const DocumentTextIcon = () => (
 const CodeBracketIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
       <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 12" />
+    </svg>
+);
+
+const ChatBubbleLeftRightIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-1">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193l-3.72 3.72a1.125 1.125 0 0 1-1.59 0l-3.72-3.72c-1.133-.093-1.98-1.057-1.98-2.193v-4.286c0-.97.616-1.813 1.5-2.097m0 0A7.5 7.5 0 1 0 5.75 8.511m14.5 0c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193l-3.72 3.72a1.125 1.125 0 0 1-1.59 0l-3.72-3.72c-1.133-.093-1.98-1.057-1.98-2.193v-4.286c0-.97.616-1.813 1.5-2.097m0 0A7.5 7.5 0 1 0 5.75 8.511" />
     </svg>
 );
 
@@ -727,7 +740,62 @@ const CodeReviewView = ({ addLog }: { addLog: (source: string, message: string) 
     );
 };
 
+const AgentCommunicationView = ({ messages }: { messages: AgentMessage[] }) => {
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+
+    if (messages.length === 0) {
+        return (
+            <div className="flex items-center justify-center h-full text-gray-500">
+                <p>Agent communication channel is clear.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-4 h-full bg-gray-900 text-white overflow-y-auto custom-scrollbar">
+            <div className="space-y-4">
+                {messages.map((msg) => (
+                    <div key={msg.id} className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center shrink-0 mt-1">
+                            <CpuChipIcon />
+                        </div>
+                        <div className="flex-1">
+                            <div className="flex items-baseline gap-2">
+                                <p className="font-bold text-sky-400">{msg.from}</p>
+                                <p className="text-xs text-gray-500">{msg.time}</p>
+                            </div>
+                            <div className="bg-gray-800 p-3 rounded-lg mt-1">
+                                <p className="whitespace-pre-wrap text-gray-300">{msg.message}</p>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+                <div ref={messagesEndRef} />
+            </div>
+        </div>
+    );
+};
+
 const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void }) => {
+    const lineNumbersRef = useRef<HTMLDivElement>(null);
+    const preRef = useRef<HTMLPreElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const handleScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
+        const { scrollTop, scrollLeft } = e.currentTarget;
+        if (preRef.current) {
+            preRef.current.scrollTop = scrollTop;
+            preRef.current.scrollLeft = scrollLeft;
+        }
+        if (lineNumbersRef.current) {
+            lineNumbersRef.current.scrollTop = scrollTop;
+        }
+    }, []);
+
     if (!activeFile) {
         return <div className="flex items-center justify-center h-full text-gray-500">Select a file to view its content.</div>;
     }
@@ -741,11 +809,13 @@ const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null,
 
     return (
         <div className="font-mono text-sm text-gray-200 h-full flex overflow-hidden bg-gray-900">
-            <div className="py-2 pr-4 text-right text-gray-500 select-none sticky top-0 bg-gray-900 border-r border-gray-700/50">
+            <div ref={lineNumbersRef} className="py-2 pr-4 text-right text-gray-500 select-none bg-gray-900 border-r border-gray-700/50 overflow-y-hidden">
                 {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
             </div>
             <div className="relative w-full h-full">
                 <textarea
+                    ref={textareaRef}
+                    onScroll={handleScroll}
                     value={activeFile.content}
                     onChange={(e) => onCodeChange(e.target.value)}
                     className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-white p-2 resize-none focus:outline-none leading-relaxed tracking-wide custom-scrollbar"
@@ -754,7 +824,7 @@ const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null,
                     autoComplete="off"
                     autoCapitalize="off"
                 />
-                <pre className="absolute inset-0 p-2 pointer-events-none w-full h-full overflow-auto custom-scrollbar leading-relaxed tracking-wide" aria-hidden="true">
+                <pre ref={preRef} className="absolute inset-0 p-2 pointer-events-none w-full h-full overflow-hidden leading-relaxed tracking-wide" aria-hidden="true">
                     <code className="block whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightedCode }} />
                 </pre>
             </div>
@@ -762,7 +832,7 @@ const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null,
     );
 };
 
-const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void, formatCode: () => void, addLog: (source: string, message: string) => void }) => {
+const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog, agentMessages }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void, formatCode: () => void, addLog: (source: string, message: string) => void, agentMessages: AgentMessage[] }) => {
   const [activeTab, setActiveTab] = useState('code');
   const [designDocument, setDesignDocument] = useState('');
 
@@ -787,6 +857,7 @@ const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog }: { activeF
   
   const TABS = [
     { id: 'code', label: 'Code Editor', icon: <CodeBracketIcon /> },
+    { id: 'comms', label: 'Agent Comms', icon: <ChatBubbleLeftRightIcon /> },
     { id: 'design', label: 'System Design', icon: <DocumentTextIcon /> },
     { id: 'canvas', label: 'UI Canvas', icon: <SparklesIcon className="w-5 h-5 mr-1" /> },
     { id: 'review', label: 'Code Review', icon: <CheckCircleIcon /> },
@@ -812,9 +883,8 @@ const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog }: { activeF
       </div>
 
       <div className="flex-grow overflow-y-auto">
-        {activeTab === 'code' && (
-            <CodeEditor activeFile={activeFile} onCodeChange={onCodeChange} />
-        )}
+        {activeTab === 'code' && <CodeEditor activeFile={activeFile} onCodeChange={onCodeChange} />}
+        {activeTab === 'comms' && <AgentCommunicationView messages={agentMessages} />}
         {activeTab === 'design' && <DesignView onProcess={handleGenerateDesign} designDocument={designDocument} />}
         {activeTab === 'canvas' && <CanvasView addLog={addLog} />}
         {activeTab === 'review' && <CodeReviewView addLog={addLog} />}
@@ -920,11 +990,18 @@ const App = () => {
     const [agents, setAgents] = useState<Agent[]>(initialAgents);
     const [conversation, setConversation] = useState<Message[]>(initialConversation);
     const [logs, setLogs] = useState<TerminalLog[]>(initialTerminalLogs);
+    const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
     const [isFullscreen, setIsFullscreen] = useState(false);
     
     const addLog = useCallback((source: string, message: string) => {
         const time = new Date().toLocaleTimeString('en-US', { hour12: false });
         setLogs(prev => [...prev.slice(-100), { time, source, message }]); // Keep last 100 logs
+    }, []);
+
+    const addAgentMessage = useCallback((from: string, message: string) => {
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const id = Date.now() + Math.random();
+        setAgentMessages(prev => [...prev.slice(-100), { id, time, from, message }]);
     }, []);
     
     const createFileNode = useCallback((path: string, content: string) => {
@@ -1081,10 +1158,11 @@ const App = () => {
                             action: {
                                 type: Type.OBJECT,
                                 properties: {
-                                    type: { type: Type.STRING, description: "Action type: 'WAIT', 'CREATE_FILE', or 'UPDATE_FILE'." },
+                                    type: { type: Type.STRING, description: "Action type: 'WAIT', 'CREATE_FILE', 'UPDATE_FILE', or 'SEND_MESSAGE'." },
                                     duration: { type: Type.INTEGER, description: "Wait duration in ms (for WAIT action)." },
                                     path: { type: Type.STRING, description: "File path (for file actions)." },
-                                    content: { type: Type.STRING, description: "File content (for file actions)." }
+                                    content: { type: Type.STRING, description: "File content (for file actions)." },
+                                    message: { type: Type.STRING, description: "The message content (for SEND_MESSAGE action)." }
                                 }
                             }
                         }
@@ -1096,7 +1174,7 @@ const App = () => {
         const prompt = `You are an AI project orchestrator. A user has requested: "${text}".
         Generate a JSON object representing a development plan. The plan should be an array of steps.
         The agents available are: "${agentNames}".
-        The development plan should be a logical sequence. For a new UI component, the flow is typically: Requirements Analyst -> UI/UX Architect -> Frontend Coder -> QA & Security Agent.
+        The development plan should be a logical sequence. Encourage agents to communicate using the 'SEND_MESSAGE' action before writing code. For example, the UI/UX Architect can send a message to the Frontend Coder with component details.
         For file content, generate plausible, simple, and complete code for the request.
         For a WAIT action, use a duration between 1000 and 3000 ms.
         Respond ONLY with the JSON object that adheres to the schema.`;
@@ -1131,6 +1209,8 @@ const App = () => {
                     createFileNode(step.action.path, step.action.content);
                 } else if (step.action?.type === 'UPDATE_FILE' && step.action.path && step.action.content) {
                     updateFileContent(step.action.path, step.action.content);
+                } else if (step.action?.type === 'SEND_MESSAGE' && step.action.message) {
+                    addAgentMessage(step.agent, step.action.message);
                 }
             }
 
@@ -1144,7 +1224,7 @@ const App = () => {
             addLog('Error', `Failed to execute plan: ${errorMessage}`);
             setAgents(prev => prev.map(a => ({ ...a, status: 'Idle', task: undefined })));
         }
-    }, [addLog, createFileNode, updateFileContent]);
+    }, [addLog, createFileNode, updateFileContent, addAgentMessage]);
 
     const handleToggleFullscreen = useCallback(() => {
         const doc = window.document;
@@ -1191,7 +1271,7 @@ const App = () => {
             <LeftPanel agents={agents} files={files} onFileSelect={setActiveFile} activeFile={activeFile} />
             
             <main className={`flex-1 flex flex-col min-w-0 ${isFullscreen ? 'hidden' : ''}`}>
-                 <CenterPanel activeFile={activeFile} onCodeChange={handleCodeChange} formatCode={formatCode} addLog={addLog} />
+                 <CenterPanel activeFile={activeFile} onCodeChange={handleCodeChange} formatCode={formatCode} addLog={addLog} agentMessages={agentMessages} />
             </main>
 
             <RightPanel
