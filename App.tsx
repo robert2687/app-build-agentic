@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
@@ -7,6 +8,9 @@ import * as pluginEstree from "https://esm.sh/prettier@3.3.2/plugins/estree";
 import * as pluginHtml from "https://esm.sh/prettier@3.3.2/plugins/html";
 import * as pluginPostcss from "https://esm.sh/prettier@3.3.2/plugins/postcss";
 import * as monaco from 'https://esm.sh/monaco-editor@0.49.0';
+import { WebContainer } from 'https://esm.sh/@webcontainer/api?module';
+import { diffLines } from 'https://esm.sh/diff@5.2.0';
+
 
 declare global {
   interface Window {
@@ -119,11 +123,22 @@ interface FileNode {
   path: string;
 }
 
-interface Agent {
-  name:string;
-  status: 'Idle' | 'Active';
-  task?: string;
+type AgentTaskState = 'Pending' | 'InProgress' | 'Completed' | 'Failed';
+
+// FIX: Add filePath property to AgentTask to align with orchestrator output and usage in task execution.
+interface AgentTask {
+    id: string;
+    description: string;
+    state: AgentTaskState;
+    filePath: string;
 }
+
+interface Agent {
+  name: string;
+  status: 'Idle' | 'Working';
+  tasks: AgentTask[];
+}
+
 
 interface TerminalLog {
     id: number;
@@ -137,6 +152,11 @@ interface Commit {
     message: string;
     author: string;
     date: string;
+}
+
+interface QAProblem {
+    filePath: string;
+    message: string;
 }
 
 // --- MOCK DATA ---
@@ -227,15 +247,16 @@ button:hover {
 ` },
         ],
     },
-    { name: 'package.json', type: 'file', extension: 'json', path: '/package.json', content: '{ "name": "my-app" }' },
+    { name: 'package.json', type: 'file', extension: 'json', path: '/package.json', content: '{ "name": "my-app", "scripts": { "test": "echo \\"Error: no test specified\\" && exit 1" } }' },
     { name: '.gitignore', type: 'file', path: '/.gitignore', content: 'node_modules\ndist\nbuild' },
 ];
 
 const initialAgents: Agent[] = [
-    { name: 'Orchestrator', status: 'Idle' },
-    { name: 'Frontend-Dev', status: 'Idle' },
-    { name: 'Backend-Dev', status: 'Idle' },
-    { name: 'QA-Tester', status: 'Idle' },
+    { name: 'Orchestrator', status: 'Idle', tasks: [] },
+    { name: 'Frontend-Dev', status: 'Idle', tasks: [] },
+    { name: 'Backend-Dev', status: 'Idle', tasks: [] },
+    { name: 'QA-Tester', status: 'Idle', tasks: [] },
+    { name: 'UX-Designer', status: 'Idle', tasks: [] },
 ];
 
 
@@ -258,6 +279,9 @@ const JSONIcon = () => <div className="h-5 w-5 mr-2 shrink-0 text-green-500 font
 const GitIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 4.5l-9 9m9 0l-9-9" /></svg>;
 const CommitAllIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>;
 const ChevronDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>;
+const SendIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clipRule="evenodd" /></svg>;
+const SpinnerIcon = () => <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
+
 
 const FileIcon = ({ extension }: { extension?: string }) => {
     switch (extension) {
@@ -400,17 +424,35 @@ const SourceControlPanel: React.FC<{
     );
 };
 
+const TaskStateIcon: React.FC<{ state: AgentTaskState }> = ({ state }) => {
+    switch (state) {
+        case 'InProgress': return <SpinnerIcon />;
+        case 'Completed': return <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>;
+        case 'Failed': return <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>;
+        case 'Pending':
+        default: return <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-yellow-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.414-1.414L11 10.586V6z" clipRule="evenodd" /></svg>;
+    }
+}
+
 const AgentPanel: React.FC<{ agents: Agent[] }> = ({ agents }) => (
-    <div className="h-full p-2 text-sm">
-        <CollapsibleSection title="Active Agents">
-            <div className="space-y-2">
+    <div className="h-full p-2 text-sm overflow-y-auto">
+        <CollapsibleSection title="Team Status">
+            <div className="space-y-3 p-1">
                 {agents.map(agent => (
                     <div key={agent.name} className="bg-gray-700/50 p-3 rounded-md">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center mb-2">
                             <span className="font-semibold text-white">{agent.name}</span>
-                            <span className={`px-2 py-0.5 text-xs rounded-full ${agent.status === 'Active' ? 'bg-green-500 text-green-900' : 'bg-gray-500 text-gray-900'}`}>{agent.status}</span>
+                            <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${agent.status === 'Working' ? 'bg-blue-500 text-blue-900' : 'bg-gray-500 text-gray-900'}`}>{agent.status}</span>
                         </div>
-                        {agent.task && <p className="text-sm text-gray-400 mt-1">{agent.task}</p>}
+                        <div className="space-y-1.5 pl-1 border-l-2 border-gray-600">
+                            {agent.tasks.length === 0 && <p className="text-xs text-gray-500 italic ml-2">No tasks assigned.</p>}
+                            {agent.tasks.map(task => (
+                                <div key={task.id} className="flex items-start ml-2">
+                                    <div className="mt-0.5 mr-2 shrink-0"><TaskStateIcon state={task.state} /></div>
+                                    <p className={`text-xs ${task.state === 'Completed' ? 'text-gray-500 line-through' : 'text-gray-300'}`}>{task.description}</p>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 ))}
             </div>
@@ -418,8 +460,9 @@ const AgentPanel: React.FC<{ agents: Agent[] }> = ({ agents }) => (
     </div>
 );
 
+
 const Sidebar: React.FC<{ activeView: string; files: FileNode[]; activeFile: string | null; onFileSelect: (path: string) => void; scmData: any }> = ({ activeView, files, activeFile, onFileSelect, scmData }) => {
-    const viewMap: { [key: string]: { title: string; component: React.ReactNode } } = {
+    const viewMap: { [key:string]: { title: string; component: React.ReactNode } } = {
         'explorer': { title: 'Explorer', component: <FileExplorer files={files} activeFile={activeFile} onSelect={onFileSelect} /> },
         'source-control': { title: 'Source Control', component: <SourceControlPanel {...scmData} /> },
         'agents': { title: 'Agents', component: <AgentPanel agents={scmData.agents} /> }
@@ -435,9 +478,10 @@ const Sidebar: React.FC<{ activeView: string; files: FileNode[]; activeFile: str
     );
 };
 
-const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, content: string) => void }> = ({ file, onContentChange }) => {
+const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, content: string) => void; originalFileContents: Map<string, string> }> = ({ file, onContentChange, originalFileContents }) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const monacoInstanceRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+    const decorationsRef = useRef<string[]>([]);
 
     useEffect(() => {
         if (editorRef.current && !monacoInstanceRef.current) {
@@ -468,9 +512,72 @@ const Editor: React.FC<{ file: FileNode | null; onContentChange: (path: string, 
             monacoInstanceRef.current.setModel(model);
         }
     }, [file]);
+    
+    useEffect(() => {
+        const monacoInstance = monacoInstanceRef.current;
+        if (!monacoInstance || !file) return;
+
+        const originalContent = originalFileContents.get(file.path);
+        const modifiedContent = file.content;
+
+        if (typeof originalContent !== 'string' || originalContent === modifiedContent) {
+            decorationsRef.current = monacoInstance.deltaDecorations(decorationsRef.current, []);
+            return;
+        }
+
+        const diffs = diffLines(originalContent, modifiedContent || '');
+        const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
+        let lineNumber = 1;
+
+        diffs.forEach(part => {
+            const lineCount = (part.value.match(/\n/g) || []).length;
+            if (part.added) {
+                newDecorations.push({
+                    range: new monaco.Range(lineNumber, 1, lineNumber + lineCount -1, 1),
+                    options: { isWholeLine: true, className: 'diff-added' }
+                });
+            } else if (part.removed) {
+                // Not showing removed lines directly, but could add gutter indicators
+            } else { // Unchanged
+                 // Could check for intra-line changes if needed
+            }
+            if (!part.removed) {
+                lineNumber += lineCount;
+            }
+        });
+
+        // A simpler check for modification if diffLines is too complex
+        const originalLines = originalContent.split('\n');
+        const modifiedLines = (modifiedContent || '').split('\n');
+        const maxLines = Math.max(originalLines.length, modifiedLines.length);
+
+        for (let i = 0; i < maxLines; i++) {
+            if (originalLines[i] !== modifiedLines[i]) {
+                if (i < modifiedLines.length && i < originalLines.length) { // Modified
+                     newDecorations.push({
+                        range: new monaco.Range(i + 1, 1, i + 1, 1),
+                        options: { isWholeLine: true, className: 'diff-modified' }
+                    });
+                } else if (i < modifiedLines.length) { // Added
+                    newDecorations.push({
+                        range: new monaco.Range(i + 1, 1, i + 1, 1),
+                        options: { isWholeLine: true, className: 'diff-added' }
+                    });
+                }
+            }
+        }
+
+
+        decorationsRef.current = monacoInstance.deltaDecorations(decorationsRef.current, newDecorations);
+
+    }, [file?.content, file?.path, originalFileContents]);
 
     return (
         <div className="h-full w-full bg-[#1E1E1E]">
+            <style>{`
+                .diff-added { background-color: rgba(60, 120, 60, 0.3) !important; }
+                .diff-modified { background-color: rgba(60, 60, 120, 0.3) !important; }
+            `}</style>
             {file ? <div ref={editorRef} className="h-full w-full"></div> : <div className="flex items-center justify-center h-full text-gray-500">Select a file to begin editing.</div>}
         </div>
     );
@@ -517,13 +624,41 @@ const PreviewPanel: React.FC<{ files: FileNode[] }> = ({ files }) => {
     return <div className="h-full w-full bg-white"><iframe srcDoc={iframeContent} title="Preview" sandbox="allow-scripts allow-same-origin" className="w-full h-full border-none" /></div>;
 };
 
-const Terminal: React.FC<{ logs: TerminalLog[] }> = ({ logs }) => {
+const Terminal: React.FC<{ logs: TerminalLog[], onRunCommand: (cmd: string) => void }> = ({ logs, onRunCommand }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [logs]);
-    return (<div ref={scrollRef} className="h-full bg-[#1E1E1E] text-white font-mono text-sm p-4 overflow-y-auto"><pre>{logs.map(log => (<div key={log.id} className="flex"><span className="text-gray-500 mr-4">{log.time}</span><span className="text-cyan-400 mr-2">{`[${log.source}]`}</span><p className="flex-1 whitespace-pre-wrap">{log.message}</p></div>))}</pre></div>);
+    
+    return (
+        <div ref={scrollRef} className="h-full bg-[#1E1E1E] text-white font-mono text-sm p-4 overflow-y-auto">
+            <pre>
+                {logs.map(log => (
+                    <div key={log.id} className="flex">
+                        <span className="text-gray-500 mr-4">{log.time}</span>
+                        <span className="text-cyan-400 mr-2">{`[${log.source}]`}</span>
+                        <p className="flex-1 whitespace-pre-wrap">{log.message}</p>
+                    </div>
+                ))}
+            </pre>
+             <div className="flex mt-2">
+                <span className="text-green-400 mr-2">~ $</span>
+                <input
+                    type="text"
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            onRunCommand(e.currentTarget.value);
+                            e.currentTarget.value = '';
+                        }
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none text-white"
+                    placeholder="Enter command..."
+                />
+            </div>
+        </div>
+    );
 };
 
-const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; onSelectFile: (path: string) => void; onCloseFile: (path: string) => void; onContentChange: (path: string, content: string) => void; files: FileNode[] }> = ({ openFiles, activeFile, onSelectFile, onCloseFile, onContentChange, files }) => {
+
+const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; onSelectFile: (path: string) => void; onCloseFile: (path: string) => void; onContentChange: (path: string, content: string) => void; files: FileNode[], originalFileContents: Map<string, string> }> = ({ openFiles, activeFile, onSelectFile, onCloseFile, onContentChange, files, originalFileContents }) => {
     const [view, setView] = useState<'editor' | 'preview'>('editor');
     const activeFileNode = useMemo(() => openFiles.find(f => f.path === activeFile) || null, [openFiles, activeFile]);
 
@@ -544,32 +679,69 @@ const EditorPanel: React.FC<{ openFiles: FileNode[], activeFile: string | null; 
                 </div>
             </div>
             <div className="flex-grow relative">
-                {view === 'editor' ? <Editor file={activeFileNode} onContentChange={onContentChange} /> : <PreviewPanel files={files} />}
+                {view === 'editor' ? <Editor file={activeFileNode} onContentChange={onContentChange} originalFileContents={originalFileContents} /> : <PreviewPanel files={files} />}
             </div>
         </div>
     );
 };
 
-const BottomPanel: React.FC<{ logs: TerminalLog[] }> = ({ logs }) => {
+const PromptBar: React.FC<{ onSubmit: (prompt: string) => void; isWorking: boolean }> = ({ onSubmit, isWorking }) => {
+    const [prompt, setPrompt] = useState('');
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (prompt.trim() && !isWorking) {
+            onSubmit(prompt);
+            setPrompt('');
+        }
+    };
+    return (
+        <form onSubmit={handleSubmit} className="shrink-0 border-t border-b border-gray-700 p-2 bg-gray-800 flex items-center space-x-2">
+            <input
+                type="text"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Provide a high-level goal for the AI agents (e.g., 'Create a blue login button component')"
+                className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                disabled={isWorking}
+            />
+            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md disabled:bg-gray-500 disabled:cursor-not-allowed" disabled={isWorking || !prompt.trim()}>
+                {isWorking ? <SpinnerIcon /> : <SendIcon />}
+            </button>
+        </form>
+    );
+}
+
+const BottomPanel: React.FC<{ logs: TerminalLog[], problems: QAProblem[], onRunCommand: (cmd: string) => void }> = ({ logs, problems, onRunCommand }) => {
     const [activeTab, setActiveTab] = useState('terminal');
     return (
-        <div className="h-48 bg-gray-800 flex flex-col shrink-0 border-t border-gray-700">
+        <div className="h-48 bg-gray-800 flex flex-col shrink-0">
             <div className="flex bg-gray-800 shrink-0">
                 <button onClick={() => setActiveTab('terminal')} className={`px-4 py-1.5 text-sm uppercase tracking-wider ${activeTab === 'terminal' ? 'bg-[#1E1E1E] text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>Terminal</button>
-                <button onClick={() => setActiveTab('problems')} className={`px-4 py-1.5 text-sm uppercase tracking-wider ${activeTab === 'problems' ? 'bg-[#1E1E1E] text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>Problems</button>
+                <button onClick={() => setActiveTab('problems')} className={`px-4 py-1.5 text-sm uppercase tracking-wider ${activeTab === 'problems' ? 'bg-[#1E1E1E] text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>Problems ({problems.length})</button>
             </div>
             <div className="flex-grow overflow-hidden">
-                {activeTab === 'terminal' && <Terminal logs={logs} />}
-                {activeTab === 'problems' && <div className="p-4 text-gray-500 text-sm">No problems have been detected.</div>}
+                {activeTab === 'terminal' && <Terminal logs={logs} onRunCommand={onRunCommand} />}
+                {activeTab === 'problems' && (
+                    <div className="p-4 text-gray-300 text-sm overflow-y-auto h-full">
+                        {problems.length === 0 ? "No problems have been detected." :
+                            problems.map((p, i) => <div key={i} className="mb-2"><span className="font-semibold text-yellow-400">{p.filePath}: </span>{p.message}</div>)
+                        }
+                    </div>
+                )}
             </div>
         </div>
     );
 };
 
-const StatusBar: React.FC = () => (
+
+const StatusBar: React.FC<{ webContainerStatus: string }> = ({ webContainerStatus }) => (
     <div className="h-6 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-4 text-sm text-gray-300 shrink-0">
         <div className="flex items-center">
             <GitBranchIcon /> main
+        </div>
+        <div className="flex items-center">
+            {webContainerStatus !== 'Ready' && <SpinnerIcon />}
+            <span className="ml-2">{webContainerStatus}</span>
         </div>
         <div>UTF-8</div>
     </div>
@@ -582,11 +754,13 @@ const App: React.FC = () => {
     const [files, setFiles] = useState<FileNode[]>(initialFiles);
     const [agents, setAgents] = useState<Agent[]>(initialAgents);
     const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([]);
+    const [qaProblems, setQaProblems] = useState<QAProblem[]>([]);
 
     // UI State
     const [activeView, setActiveView] = useState('explorer'); // explorer, source-control, agents
     const [openFiles, setOpenFiles] = useState<string[]>(['/src/App.tsx']);
     const [activeFile, setActiveFile] = useState<string | null>('/src/App.tsx');
+    const [isWorking, setIsWorking] = useState(false);
 
     // Git State
     const [originalFileContents, setOriginalFileContents] = useState(new Map<string, string>());
@@ -597,8 +771,25 @@ const App: React.FC = () => {
     const [commitMessage, setCommitMessage] = useState('');
     const [remoteCommits, setRemoteCommits] = useState<Commit[]>([]);
     const [pullableCommits, setPullableCommits] = useState(0);
+    
+    // WebContainer State
+    const webContainerInstance = useRef<WebContainer | null>(null);
+    const [webContainerStatus, setWebContainerStatus] = useState('Booting WebContainer...');
+    
+    // Gemini AI
+    const ai = useMemo(() => {
+        if (!process.env.API_KEY) {
+            console.error("API_KEY is not set.");
+            return null;
+        }
+        return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }, []);
 
     // --- UTILITY FUNCTIONS ---
+    const addTerminalLog = useCallback((source: string, message: string) => {
+        setTerminalLogs(prev => [...prev, { id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), source, message }]);
+    }, []);
+
     const findFile = useCallback((nodes: FileNode[], path: string): FileNode | null => {
         for (const node of nodes) {
             if (node.path === path) return node;
@@ -610,45 +801,139 @@ const App: React.FC = () => {
         return null;
     }, []);
 
-    const updateFileContent = useCallback((nodes: FileNode[], path: string, content: string): FileNode[] => {
-        return nodes.map(node => {
-            if (node.path === path) return { ...node, content };
-            if (node.children) return { ...node, children: updateFileContent(node.children, path, content) };
-            return node;
+    const updateFileContent = useCallback((path: string, content: string) => {
+        setFiles(prevFiles => {
+            const updater = (nodes: FileNode[]): FileNode[] => {
+                 return nodes.map(node => {
+                    if (node.path === path) return { ...node, content };
+                    if (node.children) return { ...node, children: updater(node.children) };
+                    return node;
+                });
+            }
+            return updater(prevFiles);
         });
     }, []);
     
-    const addTerminalLog = (source: string, message: string) => {
-        setTerminalLogs(prev => [...prev, { id: Date.now() + Math.random(), time: new Date().toLocaleTimeString(), source, message }]);
-    };
+    const createFile = useCallback((path: string, content: string) => {
+        const parts = path.split('/').filter(p => p);
+        const fileName = parts.pop();
+        if(!fileName) return;
+
+        setFiles(prevFiles => {
+            let currentLevel = prevFiles;
+            let currentPath = '';
+
+            for (const part of parts) {
+                currentPath += `/${part}`;
+                let folder = currentLevel.find(f => f.name === part && f.type === 'folder');
+                if (!folder) {
+                    folder = { name: part, type: 'folder', path: currentPath, children: [] };
+                    currentLevel.push(folder);
+                }
+                currentLevel = folder.children!;
+            }
+            
+            if (!currentLevel.find(f => f.name === fileName)) {
+                 currentLevel.push({
+                    name: fileName,
+                    type: 'file',
+                    path: path,
+                    content: content,
+                    extension: fileName.split('.').pop()
+                });
+            }
+            return [...prevFiles];
+        });
+    }, []);
+    
+     const deleteFile = useCallback((path: string) => {
+        setFiles(prevFiles => {
+            const deleter = (nodes: FileNode[]): FileNode[] => {
+                return nodes.filter(node => node.path !== path).map(node => {
+                    if (node.children) {
+                        return { ...node, children: deleter(node.children) };
+                    }
+                    return node;
+                });
+            };
+            return deleter(prevFiles);
+        });
+    }, []);
 
     // --- INITIALIZATION ---
-    const initGit = () => {
-        const initialMap = new Map<string, string>();
-        const untracked: string[] = [];
-        const traverse = (nodes: FileNode[]) => {
-            nodes.forEach(node => {
-                if (node.type === 'file' && typeof node.content === 'string') untracked.push(node.path);
-                else if (node.children) traverse(node.children);
-            });
+    useEffect(() => {
+        const initGit = () => {
+            const initialMap = new Map<string, string>();
+            const untracked: string[] = [];
+            const traverse = (nodes: FileNode[]) => {
+                nodes.forEach(node => {
+                    if (node.type === 'file' && typeof node.content === 'string') {
+                        initialMap.set(node.path, node.content);
+                    } else if (node.children) {
+                        traverse(node.children);
+                    }
+                });
+            };
+            traverse(files);
+            setOriginalFileContents(initialMap);
+            addTerminalLog('git', 'Initialized empty Git repository.');
         };
-        traverse(files);
-        setOriginalFileContents(initialMap);
-        setUntrackedFiles(untracked);
-        addTerminalLog('git', 'Initialized empty Git repository.');
-        const remoteCommit: Commit = { id: 'remote001', message: 'feat: initial remote setup', author: 'Remote', date: new Date(Date.now() - 100000).toISOString() };
-        setRemoteCommits([remoteCommit]);
-    };
-    useEffect(initGit, []);
+        initGit();
+        
+        const bootWebContainer = async () => {
+            try {
+                if (webContainerInstance.current) return;
+                const wc = await WebContainer.boot();
+                webContainerInstance.current = wc;
+                setWebContainerStatus('Mounting Files...');
+
+                wc.on('server-ready', (port, url) => {
+                    addTerminalLog('webcontainer', `Server ready at ${url}`);
+                });
+
+                wc.on('error', (err) => {
+                    addTerminalLog('webcontainer-error', err.message);
+                });
+                
+                const syncFiles = async () => {
+                    const fileSystem: any = {};
+                    const buildFs = (nodes: FileNode[], base: any) => {
+                        for(const node of nodes) {
+                            if(node.type === 'file') {
+                                base[node.name] = { file: { contents: node.content || '' } };
+                            } else if (node.children) {
+                                base[node.name] = { directory: {} };
+                                buildFs(node.children, base[node.name].directory);
+                            }
+                        }
+                    }
+                    buildFs(initialFiles, fileSystem);
+                    await wc.mount(fileSystem);
+                };
+
+                await syncFiles();
+                setWebContainerStatus('Ready');
+            } catch (error: any) {
+                setWebContainerStatus(`Error: ${error.message}`);
+                addTerminalLog('error', `WebContainer boot failed: ${error.message}`);
+            }
+        };
+        bootWebContainer();
+    }, []); // Only on initial mount
     
     // --- GIT FILE TRACKING EFFECT ---
     useEffect(() => {
         const modified: string[] = [];
+        const untracked: string[] = [];
         const traverse = (nodes: FileNode[]) => {
             nodes.forEach(node => {
                 if (node.type === 'file' && typeof node.content === 'string') {
-                    if (originalFileContents.has(node.path) && originalFileContents.get(node.path) !== node.content && !stagedFiles.includes(node.path)) {
-                        modified.push(node.path);
+                    if (originalFileContents.has(node.path)) {
+                        if (originalFileContents.get(node.path) !== node.content && !stagedFiles.includes(node.path)) {
+                            modified.push(node.path);
+                        }
+                    } else if(!stagedFiles.includes(node.path)) {
+                        untracked.push(node.path)
                     }
                 } else if (node.children) {
                     traverse(node.children);
@@ -657,6 +942,7 @@ const App: React.FC = () => {
         };
         traverse(files);
         setModifiedFiles(modified);
+        setUntrackedFiles(untracked);
     }, [files, originalFileContents, stagedFiles]);
 
     // --- EVENT HANDLERS ---
@@ -674,15 +960,130 @@ const App: React.FC = () => {
             setActiveFile(newOpenFiles[newOpenFiles.length - 1] || null);
         }
     };
+    
+    // --- WebContainer Command Runner ---
+    const runTerminalCommand = useCallback(async (command: string) => {
+        if (!webContainerInstance.current || webContainerStatus !== 'Ready') {
+            addTerminalLog('system', 'WebContainer is not ready.');
+            return;
+        }
+        addTerminalLog('user', `$ ${command}`);
+        const [cmd, ...args] = command.split(' ');
+        const process = await webContainerInstance.current.spawn(cmd, args);
+        process.output.pipeTo(new WritableStream({
+            write(data) {
+                addTerminalLog(cmd, data);
+            }
+        }));
+        const exitCode = await process.exit;
+        addTerminalLog('system', `Process exited with code ${exitCode}`);
+    }, [addTerminalLog, webContainerStatus]);
 
-    const handleFileContentChange = useCallback((path: string, content: string) => {
-        setFiles(prevFiles => updateFileContent(prevFiles, path, content));
-    }, [updateFileContent]);
+    // --- AI Agent Logic ---
+    const updateAgentTaskState = (agentName: string, taskId: string, state: AgentTaskState) => {
+        setAgents(prev => prev.map(agent => {
+            if(agent.name === agentName) {
+                const newTasks = agent.tasks.map(task => task.id === taskId ? { ...task, state } : task);
+                const isWorking = newTasks.some(t => t.state === 'InProgress' || t.state === 'Pending');
+                return { ...agent, tasks: newTasks, status: isWorking ? 'Working' : 'Idle' };
+            }
+            return agent;
+        }));
+    }
+
+    // FIX: Re-structured task creation and execution to fix type errors and a logic bug
+    // where the execution loop ran on stale state.
+    const handlePromptSubmit = async (prompt: string) => {
+        if (!ai) {
+            addTerminalLog('system-error', 'Gemini AI not initialized. Check API Key.');
+            return;
+        }
+        setIsWorking(true);
+        addTerminalLog('user', `Goal: ${prompt}`);
+
+        try {
+            // 1. Orchestrator
+            addTerminalLog('Orchestrator', 'Analyzing goal and creating task plan...');
+            const orchestratorResponse = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: `Based on the user goal "${prompt}", break it down into a sequence of tasks for a team of AI agents (Frontend-Dev, QA-Tester). Respond with a JSON array of tasks. Each task must have "agent", "description", and "filePath" properties. Example: [{"agent": "Frontend-Dev", "description": "Create a new React component in a file.", "filePath": "/src/components/LoginButton.tsx"}]`,
+                config: { responseMimeType: "application/json" }
+            });
+            const tasks = JSON.parse(orchestratorResponse.text);
+            addTerminalLog('Orchestrator', `Plan created with ${tasks.length} tasks.`);
+
+            const tasksWithIds = tasks.map((task: any) => ({
+                ...task,
+                id: Math.random().toString(36).substring(2, 9),
+            }));
+
+            // Update agent state for UI with all tasks pending
+            setAgents(prev => {
+                const newAgents = prev.map(agent => ({ ...agent, tasks: [] })); // Clear old tasks
+                tasksWithIds.forEach((task) => {
+                    const agent = newAgents.find(a => a.name === task.agent);
+                    if (agent) {
+                        agent.tasks.push({
+                            id: task.id,
+                            description: task.description,
+                            state: 'Pending',
+                            filePath: task.filePath,
+                        });
+                        agent.status = 'Working';
+                    }
+                });
+                return newAgents;
+            });
+
+            // 2. Execute tasks sequentially
+            for (const task of tasksWithIds) {
+                updateAgentTaskState(task.agent, task.id, 'InProgress');
+                
+                if (task.agent === 'Frontend-Dev') {
+                    addTerminalLog('Frontend-Dev', `Working on: ${task.description}`);
+                    const file = findFile(files, task.filePath);
+                    const codeGenPrompt = `As an expert frontend developer, fulfill this task: "${task.description}". The target file is "${task.filePath}". If the file exists, its content is:\n\n\`\`\`${file?.content || ''}\`\`\`\n\nOnly output the complete, raw code for the file. No explanations.`;
+                    const codeGenResponse = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: codeGenPrompt });
+                    
+                    let generatedCode = codeGenResponse.text;
+                    if(generatedCode.startsWith('```')) {
+                        generatedCode = generatedCode.replace(/```(tsx|typescript|jsx|javascript)?\n/,'').replace(/```$/, '');
+                    }
+                    
+                    const formattedCode = await formatCodeWithPrettier(generatedCode, task.filePath.split('.').pop() || 'tsx');
+                    if (file) {
+                         updateFileContent(task.filePath, formattedCode);
+                    } else {
+                         createFile(task.filePath, formattedCode);
+                    }
+                    addTerminalLog('Frontend-Dev', `Completed writing to ${task.filePath}`);
+                }
+                 if(task.agent === 'QA-Tester') {
+                    addTerminalLog('QA-Tester', `Working on: ${task.description}`);
+                    const file = findFile(files, task.filePath);
+                    if(file && file.content) {
+                        const reviewPrompt = `As a QA engineer, review the following code from "${task.filePath}" for bugs, style issues, or potential improvements. Provide a short, one-sentence summary of any problems found.\n\n\`\`\`${file.content}\`\`\``;
+                        const reviewResponse = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: reviewPrompt });
+                        setQaProblems(prev => [...prev, { filePath: task.filePath, message: reviewResponse.text }]);
+                        addTerminalLog('QA-Tester', `Review of ${task.filePath} complete. Found issues.`);
+                    }
+                }
+                
+                updateAgentTaskState(task.agent, task.id, 'Completed');
+            }
+        } catch (error: any) {
+            addTerminalLog('system-error', `An AI agent failed: ${error.message}`);
+            console.error(error);
+        } finally {
+            setIsWorking(false);
+        }
+    };
+
 
     // --- Git Handlers ---
-    const handleStage = (path: string) => { setStagedFiles(prev => [...prev, path]); setModifiedFiles(prev => prev.filter(p => p !== path)); setUntrackedFiles(prev => prev.filter(p => p !== path)); addTerminalLog('git', `Staged ${path}`); };
-    const handleUnstage = (path: string) => { setStagedFiles(prev => prev.filter(p => p !== path)); if (originalFileContents.has(path)) { setModifiedFiles(prev => [...prev, path]); } else { setUntrackedFiles(prev => [...prev, path]); } addTerminalLog('git', `Unstaged ${path}`); };
-    const handleStageAll = () => { const all = [...modifiedFiles, ...untrackedFiles]; setStagedFiles(prev => [...new Set([...prev, ...all])]); setModifiedFiles([]); setUntrackedFiles([]); addTerminalLog('git', `Staged ${all.length} files.`); };
+    const handleStage = (path: string) => { setStagedFiles(prev => [...prev, path]); addTerminalLog('git', `Staged ${path}`); };
+    const handleUnstage = (path: string) => { setStagedFiles(prev => prev.filter(p => p !== path)); addTerminalLog('git', `Unstaged ${path}`); };
+    const handleStageAll = () => { const all = [...modifiedFiles, ...untrackedFiles]; setStagedFiles(prev => [...new Set([...prev, ...all])]); addTerminalLog('git', `Staged ${all.length} files.`); };
     const performCommit = (filesToCommit: string[], message: string) => {
         const newCommit: Commit = { id: Math.random().toString(36).substring(2, 9), message, author: 'You', date: new Date().toISOString() };
         setCommits(prev => [newCommit, ...prev]);
@@ -693,9 +1094,9 @@ const App: React.FC = () => {
         setCommitMessage('');
     };
     const handleCommit = () => { if (stagedFiles.length === 0 || !commitMessage.trim()) return; performCommit(stagedFiles, commitMessage); setStagedFiles([]); };
-    const handleCommitAll = () => { const all = [...new Set([...modifiedFiles, ...untrackedFiles])]; if (all.length === 0 || !commitMessage.trim()) return; addTerminalLog('git', `Staged ${all.length} files for commit.`); performCommit(all, commitMessage); setStagedFiles([]); setModifiedFiles([]); setUntrackedFiles([]); };
-    const handleFetch = () => { addTerminalLog('git', 'Fetching from remote...'); setTimeout(() => { const newCommits = remoteCommits.filter(rc => !commits.some(lc => lc.id === rc.id)); setPullableCommits(newCommits.length); addTerminalLog('git', newCommits.length > 0 ? `Fetch complete. Found ${newCommits.length} new commit(s).` : 'Fetch complete. Already up-to-date.'); }, 1000); };
-    const handlePull = () => { addTerminalLog('git', 'Pulling from remote...'); const newCommits = remoteCommits.filter(rc => !commits.some(lc => lc.id === rc.id)); setCommits(prev => [...newCommits, ...prev]); setPullableCommits(0); addTerminalLog('git', `Pull complete. Merged ${newCommits.length} commit(s).`); };
+    const handleCommitAll = () => { const all = [...new Set([...modifiedFiles, ...untrackedFiles])]; if (all.length === 0 || !commitMessage.trim()) return; addTerminalLog('git', `Staged ${all.length} files for commit.`); performCommit(all, commitMessage); setStagedFiles([]); };
+    const handleFetch = () => { addTerminalLog('git', 'Fetching from remote...'); setTimeout(() => { addTerminalLog('git', 'Fetch complete. Already up-to-date.'); }, 1000); };
+    const handlePull = () => { addTerminalLog('git', 'Pulling from remote...'); };
 
     const scmData = { modifiedFiles, untrackedFiles, stagedFiles, commits, commitMessage, onCommitMessageChange: setCommitMessage, onStage: handleStage, onUnstage: handleUnstage, onStageAll: handleStageAll, onCommit: handleCommit, onCommitAll: handleCommitAll, onFetch: handleFetch, onPull: handlePull, pullableCommits, agents };
     const openFileNodes = useMemo(() => openFiles.map(path => findFile(files, path)).filter((f): f is FileNode => f !== null), [openFiles, files, findFile]);
@@ -706,11 +1107,12 @@ const App: React.FC = () => {
                 <ActivityBar activeView={activeView} setActiveView={setActiveView} />
                 <Sidebar activeView={activeView} files={files} activeFile={activeFile} onFileSelect={handleOpenFile} scmData={scmData} />
                 <div className="flex-grow flex flex-col overflow-hidden bg-[#1E1E1E]">
-                    <EditorPanel openFiles={openFileNodes} activeFile={activeFile} onSelectFile={setActiveFile} onCloseFile={handleCloseFile} onContentChange={handleFileContentChange} files={files} />
-                    <BottomPanel logs={terminalLogs} />
+                    <EditorPanel openFiles={openFileNodes} activeFile={activeFile} onSelectFile={setActiveFile} onCloseFile={handleCloseFile} onContentChange={updateFileContent} files={files} originalFileContents={originalFileContents} />
+                    <PromptBar onSubmit={handlePromptSubmit} isWorking={isWorking} />
+                    <BottomPanel logs={terminalLogs} problems={qaProblems} onRunCommand={runTerminalCommand}/>
                 </div>
             </main>
-            <StatusBar />
+            <StatusBar webContainerStatus={webContainerStatus} />
         </div>
     );
 };
