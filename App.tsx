@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // --- TYPES ---
@@ -49,16 +49,56 @@ const FolderIcon = () => (
   </svg>
 );
 
-const FileIcon = ({ extension }: { extension?: string }) => {
-  const color = {
-    js: 'text-yellow-400', tsx: 'text-blue-400', html: 'text-orange-500', json: 'text-green-500',
-  }[extension || ''] || 'text-gray-400';
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 mr-2 ${color} shrink-0`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+const GenericFileIcon = ({ className = 'text-gray-400' } : { className?: string}) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 mr-2 ${className} shrink-0`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+  </svg>
+);
+
+const HtmlIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
+        <rect width="24" height="24" rx="3" fill="#e34c26" />
+        <text x="4" y="17" fontFamily="monospace" fontSize="12" fontWeight="bold" fill="white">{"<>"}</text>
     </svg>
-  );
+);
+
+const JsonIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
+        <rect width="24" height="24" rx="3" fill="#f1e05a" />
+        <text x="4" y="17" fontFamily="monospace" fontSize="12" fontWeight="bold" fill="black">{"{}"}</text>
+    </svg>
+);
+
+const JsIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
+        <rect width="24" height="24" rx="3" fill="#f7df1e" />
+        <text x="6" y="17" fontFamily="monospace" fontSize="14" fontWeight="bold" fill="black">JS</text>
+    </svg>
+);
+
+const TSIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24">
+        <rect width="24" height="24" rx="3" fill="#3178c6" />
+        <text x="5" y="17" fontFamily="monospace" fontSize="14" fontWeight="bold" fill="white">TS</text>
+    </svg>
+);
+
+const FileIcon = ({ extension }: { extension?: string }) => {
+  switch (extension) {
+    case 'html':
+      return <HtmlIcon />;
+    case 'json':
+      return <JsonIcon />;
+    case 'js':
+      return <JsIcon />;
+    case 'ts':
+    case 'tsx':
+      return <TSIcon />;
+    default:
+      return <GenericFileIcon />;
+  }
 };
+
 
 const CpuChipIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mr-3 shrink-0">
@@ -78,10 +118,34 @@ const CodeBracketIcon = () => (
     </svg>
 );
 
+const SearchIcon = ({ className = 'h-4 w-4 text-gray-400' }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
+);
+
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-green-500"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
 const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-red-500"><path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>;
 const ArrowPathIcon = ({ spinning = true }: { spinning?: boolean }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-5 h-5 text-blue-400 ${spinning ? 'animate-spin' : ''}`}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 11.667 0l3.181-3.183m-4.991-2.691v4.992m0 0-3.182-3.182a8.25 8.25 0 0 1-11.667 0l-3.181 3.182m4.991 2.691H7.965M16.023 9.348A8.25 8.25 0 0 1 19.5 12m0 0a8.25 8.25 0 0 1-3.477 6.651m-3.477-6.651a8.25 8.25 0 0 0-3.477-6.651m3.477 6.651L12 12" /></svg>;
 const SparklesIcon = ({ className = "w-5 h-5 mr-3 text-yellow-400" }) => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /></svg>;
+
+const FullscreenEnterIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+    </svg>
+);
+
+const FullscreenExitIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" />
+    </svg>
+);
+
+const WandIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.475 2.118A2.25 2.25 0 0 1 .75 15.375a3 3 0 0 0 5.78-1.128 2.25 2.25 0 0 1 2.475-2.118 2.25 2.25 0 0 1 2.475 2.118ZM8.25 10.5a3 3 0 1 1-5.78-1.128 2.25 2.25 0 0 0-2.475-2.118A2.25 2.25 0 0 0 .75 9.375a3 3 0 0 1 5.78 1.128 2.25 2.25 0 0 0 2.475 2.118 2.25 2.25 0 0 0 2.475-2.118Zm8.25-3a3 3 0 1 0-5.78 1.128 2.25 2.25 0 0 1-2.475 2.118A2.25 2.25 0 0 1 5.25 4.875a3 3 0 0 0 5.78-1.128 2.25 2.25 0 0 1 2.475-2.118 2.25 2.25 0 0 1 2.475 2.118Z" />
+    </svg>
+);
 
 // --- MOCK DATA ---
 const initialFileStructure: FileNode[] = [
@@ -212,39 +276,83 @@ const FileTree = ({ files, level = 0, onFileSelect, activeFile }: { files: FileN
   </div>
 );
 
-const LeftPanel = ({ agents, files, onFileSelect, activeFile }: { agents: Agent[], files: FileNode[], onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => (
-  <aside className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700 text-white w-72 p-4 flex flex-col shrink-0">
-    <div className="flex items-center mb-6">
-      <SparklesIcon className="w-6 h-6 mr-2 text-yellow-400" />
-      <h1 className="text-xl font-bold">Agentic</h1>
-    </div>
-    
-    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">Project Files</h2>
-    <div className="flex-grow overflow-y-auto mb-6 pr-2 custom-scrollbar">
-      <FileTree files={files} onFileSelect={onFileSelect} activeFile={activeFile} />
-    </div>
+const LeftPanel = ({ agents, files, onFileSelect, activeFile }: { agents: Agent[], files: FileNode[], onFileSelect: (file: FileNode) => void, activeFile: FileNode | null }) => {
+  const [searchTerm, setSearchTerm] = useState('');
 
-    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">AI Agent Team</h2>
-    <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
-      {agents.map(agent => (
-        <div key={agent.name} className="flex items-start text-sm">
-          <CpuChipIcon />
-          <div>
-            <p className="font-semibold text-gray-200">{agent.name}</p>
-            {agent.status === 'Active' ? (
-              <div className="flex items-center text-blue-400">
-                <ArrowPathIcon />
-                <span className="ml-2 text-gray-300">{agent.task}</span>
-              </div>
-            ) : (
-              <p className="text-gray-400">{agent.status}</p>
-            )}
-          </div>
+  const filterFileTree = useCallback((nodes: FileNode[], term: string): FileNode[] => {
+    if (!term.trim()) {
+      return nodes;
+    }
+    const lowerCaseTerm = term.toLowerCase();
+    const result: FileNode[] = [];
+
+    for (const node of nodes) {
+      if (node.type === 'folder') {
+        if (node.name.toLowerCase().includes(lowerCaseTerm)) {
+          result.push(node); // Include folder and all its children
+        } else {
+          const filteredChildren = filterFileTree(node.children || [], term);
+          if (filteredChildren.length > 0) {
+            result.push({ ...node, children: filteredChildren }); // Include folder with filtered children
+          }
+        }
+      } else { // It's a file
+        if (node.name.toLowerCase().includes(lowerCaseTerm)) {
+          result.push(node);
+        }
+      }
+    }
+    return result;
+  }, []);
+
+  const filteredFiles = useMemo(() => filterFileTree(files, searchTerm), [files, searchTerm, filterFileTree]);
+  
+  return (
+    <aside className="bg-gray-800/50 backdrop-blur-sm border-r border-gray-700 text-white w-72 p-4 flex flex-col shrink-0">
+      <div className="flex items-center mb-6">
+        <SparklesIcon className="w-6 h-6 mr-2 text-yellow-400" />
+        <h1 className="text-xl font-bold">Agentic</h1>
+      </div>
+      
+      <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">Project Files</h2>
+      <div className="relative mb-3 px-1">
+        <input
+          type="text"
+          placeholder="Search files..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full bg-gray-900 border border-gray-700 rounded-md py-1.5 pl-8 pr-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <SearchIcon />
         </div>
-      ))}
-    </div>
-  </aside>
-);
+      </div>
+      <div className="flex-grow overflow-y-auto mb-6 pr-2 custom-scrollbar">
+        <FileTree files={filteredFiles} onFileSelect={onFileSelect} activeFile={activeFile} />
+      </div>
+
+      <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">AI Agent Team</h2>
+      <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+        {agents.map(agent => (
+          <div key={agent.name} className="flex items-start text-sm">
+            <CpuChipIcon />
+            <div>
+              <p className="font-semibold text-gray-200">{agent.name}</p>
+              {agent.status === 'Active' ? (
+                <div className="flex items-center text-blue-400">
+                  <ArrowPathIcon />
+                  <span className="ml-2 text-gray-300">{agent.task}</span>
+                </div>
+              ) : (
+                <p className="text-gray-400">{agent.status}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+};
 
 const ChatView = ({ conversation, onSendMessage }: { conversation: Message[], onSendMessage: (text: string) => Promise<void> }) => {
     const [userInput, setUserInput] = useState('');
@@ -547,372 +655,389 @@ const CodeReviewView = ({ addLog }: { addLog: (source: string, message: string) 
 
             <div className="flex-grow bg-gray-900 border border-gray-700 rounded-lg p-4 font-mono text-sm overflow-y-auto custom-scrollbar">
                 {initialPullRequest.changes.split('\n').map((line, i) => (
-                    <div key={i} className={`flex items-start ${line.startsWith('+') ? 'bg-green-900/20 text-green-300' : line.startsWith('-') ? 'bg-red-900/20 text-red-300' : 'text-gray-400'}`}>
-                        <span className="w-10 text-right pr-4 text-gray-600 select-none">{i + 1}</span>
-                        <span className="w-4 select-none">{line.startsWith('+') ? '+' : line.startsWith('-') ? '-' : ' '}</span>
-                        <pre className="whitespace-pre-wrap">{line.substring(1)}</pre>
+                    <div key={i} className={`flex items-start px-2 ${line.startsWith('+') ? 'bg-green-900/20' : line.startsWith('-') ? 'bg-red-900/20' : ''}`}>
+                        <span className="w-8 text-right pr-4 text-gray-500 select-none">{i + 1}</span>
+                        <span className={`w-4 text-center ${line.startsWith('+') ? 'text-green-400' : line.startsWith('-') ? 'text-red-400' : 'text-gray-500'}`}>{line.startsWith('+') ? '+' : line.startsWith('-') ? '-' : ' '}</span>
+                        <pre className="whitespace-pre-wrap flex-1"><code className={`${line.startsWith('+') ? 'text-green-300' : line.startsWith('-') ? 'text-red-300' : 'text-gray-400'}`}>{line.substring(1)}</code></pre>
                     </div>
                 ))}
             </div>
-            <div className="mt-4 flex justify-end space-x-3">
-                <button className="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-6 rounded-md transition-colors">Request Changes</button>
-                <button className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-md transition-colors">Approve & Merge</button>
-            </div>
         </div>
     );
 };
 
-const CodeEditorView = ({ file, onCodeChange }: { file: FileNode, onCodeChange: (prompt: string) => Promise<void> }) => {
-    const [prompt, setPrompt] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleGenerate = async () => {
-        if (!prompt.trim()) return;
-        setIsLoading(true);
-        await onCodeChange(prompt);
-        setPrompt('');
-        setIsLoading(false);
-    };
-
-    return (
-        <div className="h-full flex flex-col bg-gray-900 text-white">
-            <div className="p-4 border-b border-gray-700">
-                <h3 className="font-mono text-lg">{file.path}</h3>
-            </div>
-            <div className="flex-grow flex overflow-hidden">
-                <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
-                    <pre className="p-4 font-mono text-sm relative w-full">
-                        <code className="block whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applySyntaxHighlighting(file.content || '', file.extension) }} />
-                    </pre>
-                </div>
-                <div className="w-1/3 min-w-[300px] max-w-sm border-l border-gray-700 p-4 flex flex-col bg-gray-800/50">
-                    <h4 className="text-lg font-semibold mb-2 flex items-center"><SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" /> AI Code Generation</h4>
-                    <p className="text-sm text-gray-400 mb-4">Describe the changes you want to make to this file. The Frontend Coder agent will generate the new code.</p>
-                    <textarea 
-                        value={prompt}
-                        onChange={e => setPrompt(e.target.value)}
-                        placeholder={`e.g., "Change the h1 text to 'Hello World' and add a red border."`}
-                        className="w-full flex-grow bg-gray-900 rounded-md p-2 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar"
-                    />
-                     <button
-                        onClick={handleGenerate}
-                        disabled={isLoading}
-                        className="mt-3 flex items-center justify-center bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 px-4 rounded-md disabled:bg-gray-500 transition-colors w-full"
-                    >
-                        <SparklesIcon className="w-5 h-5 mr-2 text-yellow-300" />
-                        {isLoading ? 'Generating...' : 'Generate Changes'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const CenterPanel = ({ conversation, addLog, onSendMessage, onProcessDocument, designDocument, activeFile, onCodeChange }: { conversation: Message[], addLog: (source: string, message: string) => void, onSendMessage: (text: string) => Promise<void>, onProcessDocument: (docText: string) => Promise<void>, designDocument: string, activeFile: FileNode | null, onCodeChange: (file: FileNode, prompt: string) => Promise<void> }) => {
-    const [activeView, setActiveView] = useState('chat');
-
-    useEffect(() => {
-        if (activeFile) {
-            setActiveView('editor');
-        }
-    }, [activeFile]);
-    
-    const handleCodeChangeForFile = (prompt: string) => {
-        if (activeFile) {
-           return onCodeChange(activeFile, prompt);
-        }
-        return Promise.resolve();
+const CodeEditor = ({ activeFile, onCodeChange }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void }) => {
+    if (!activeFile) {
+        return <div className="flex items-center justify-center h-full text-gray-500">Select a file to view its content.</div>;
     }
 
+    const highlightedCode = useMemo(() => 
+        applySyntaxHighlighting(activeFile.content, activeFile.extension),
+        [activeFile.content, activeFile.extension]
+    );
+
+    const lineCount = useMemo(() => (activeFile.content || '').split('\n').length, [activeFile.content]);
+
     return (
-        <main className="flex-1 bg-gray-900 flex flex-col">
-            <div className="flex border-b border-gray-700">
-                <button onClick={() => setActiveView('chat')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'chat' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>Chat</button>
-                 {activeFile && (
-                    <button onClick={() => setActiveView('editor')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'editor' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><CodeBracketIcon />Editor</button>
-                )}
-                <button onClick={() => setActiveView('design')} className={`py-3 px-5 text-sm font-semibold transition-colors flex items-center ${activeView === 'design' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}><DocumentTextIcon />Design</button>
-                <button onClick={() => setActiveView('canvas')} className={`py-3 px-5 text-sm font-semibold transition-colors ${activeView === 'canvas' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>Canvas</button>
-                <button onClick={() => setActiveView('review')} className={`py-3 px-5 text-sm font-semibold relative transition-colors ${activeView === 'review' ? 'bg-gray-800 text-white border-b-2 border-blue-500' : 'text-gray-400 hover:bg-gray-800/50'}`}>
-                    Code Review
-                    <span className="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-gray-900 animate-pulse"></span>
+        <div className="font-mono text-sm text-gray-200 h-full flex overflow-hidden bg-gray-900">
+            <div className="py-2 pr-4 text-right text-gray-500 select-none sticky top-0 bg-gray-900 border-r border-gray-700/50">
+                {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
+            </div>
+            <div className="relative w-full h-full">
+                <textarea
+                    value={activeFile.content}
+                    onChange={(e) => onCodeChange(e.target.value)}
+                    className="absolute inset-0 w-full h-full bg-transparent text-transparent caret-white p-2 resize-none focus:outline-none leading-relaxed tracking-wide custom-scrollbar"
+                    style={{ WebkitTextFillColor: 'transparent' }}
+                    spellCheck="false"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                />
+                <pre className="absolute inset-0 p-2 pointer-events-none w-full h-full overflow-auto custom-scrollbar leading-relaxed tracking-wide" aria-hidden="true">
+                    <code className="block whitespace-pre" dangerouslySetInnerHTML={{ __html: highlightedCode }} />
+                </pre>
+            </div>
+        </div>
+    );
+};
+
+const CenterPanel = ({ activeFile, onCodeChange, formatCode, addLog }: { activeFile: FileNode | null, onCodeChange: (newContent: string) => void, formatCode: () => void, addLog: (source: string, message: string) => void }) => {
+  const [activeTab, setActiveTab] = useState('code');
+  const [designDocument, setDesignDocument] = useState('');
+
+  const handleGenerateDesign = async (docText: string) => {
+    addLog('User', 'Requested design document generation.');
+    const prompt = `Based on the following project description, generate a detailed software design document. The document should include sections for: User Stories, System Architecture, UI/UX Flow, and Data Models. Use markdown for formatting.\n\nPROJECT DESCRIPTION:\n${docText}`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        setDesignDocument(response.text);
+        addLog('UI/UX Architect', 'Generated system design document.');
+    } catch (error) {
+        console.error("Error generating design doc:", error);
+        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+        setDesignDocument(`### Error\nFailed to generate design document:\n${errorMessage}`);
+        addLog('Error', `Failed to generate design document: ${errorMessage}`);
+    }
+  };
+  
+  const TABS = [
+    { id: 'code', label: 'Code Editor', icon: <CodeBracketIcon /> },
+    { id: 'design', label: 'System Design', icon: <DocumentTextIcon /> },
+    { id: 'canvas', label: 'UI Canvas', icon: <SparklesIcon className="w-5 h-5 mr-1" /> },
+    { id: 'review', label: 'Code Review', icon: <CheckCircleIcon /> },
+  ];
+
+  return (
+    <main className="flex-1 flex flex-col bg-gray-900 min-w-0">
+      <div className="flex items-center border-b border-gray-700 bg-gray-800/50">
+        {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id ? 'text-white border-blue-500' : 'text-gray-400 border-transparent hover:text-white hover:bg-gray-800'}`}>
+                {tab.icon}
+                <span className="ml-1">{tab.label}</span>
+            </button>
+        ))}
+        {activeTab === 'code' && activeFile && (
+            <div className="ml-auto flex items-center pr-4">
+                 <button onClick={formatCode} className="flex items-center text-gray-400 hover:text-white transition-colors p-2 rounded-md hover:bg-gray-700">
+                    <WandIcon />
+                    <span className="ml-1 text-sm hidden md:inline">Format</span>
                 </button>
             </div>
-            <div className="flex-grow overflow-y-auto">
-                {activeView === 'chat' && <ChatView conversation={conversation} onSendMessage={onSendMessage} />}
-                {activeView === 'design' && <DesignView onProcess={onProcessDocument} designDocument={designDocument} />}
-                {activeView === 'canvas' && <CanvasView addLog={addLog}/>}
-                {activeView === 'review' && <CodeReviewView addLog={addLog} />}
-                {activeView === 'editor' && activeFile && <CodeEditorView file={activeFile} onCodeChange={handleCodeChangeForFile} />}
-            </div>
-        </main>
-    );
-}
+        )}
+      </div>
 
-const RightPanel = ({ conversation, logs, addLog }: { conversation: Message[], logs: TerminalLog[], addLog: (source: string, message: string) => void }) => {
-    const [previewContent, setPreviewContent] = useState('<div class="flex h-full items-center justify-center"><p class="text-gray-500">Live preview will appear here.</p></div>');
-    const [isLoading, setIsLoading] = useState(false);
-    const terminalRef = useRef<HTMLDivElement>(null);
+      <div className="flex-grow overflow-y-auto">
+        {activeTab === 'code' && (
+            <CodeEditor activeFile={activeFile} onCodeChange={onCodeChange} />
+        )}
+        {activeTab === 'design' && <DesignView onProcess={handleGenerateDesign} designDocument={designDocument} />}
+        {activeTab === 'canvas' && <CanvasView addLog={addLog} />}
+        {activeTab === 'review' && <CodeReviewView addLog={addLog} />}
+      </div>
+    </main>
+  );
+};
+
+const RightPanel = ({ conversation, onSendMessage, logs, files, isFullscreen, onToggleFullscreen }: { conversation: Message[], onSendMessage: (text: string) => Promise<void>, logs: TerminalLog[], files: FileNode[], isFullscreen: boolean, onToggleFullscreen: () => void }) => {
+    const [activeTab, setActiveTab] = useState('preview'); // 'preview', 'terminal'
+    const iframeRef = useRef<HTMLIFrameElement>(null);
+    const terminalEndRef = useRef<HTMLDivElement>(null);
+
+    const getFileContent = useCallback((path: string): string => {
+        const pathParts = path.replace(/^\//, '').split('/');
+        let currentLevel: FileNode[] | undefined = files;
+        let foundNode: FileNode | undefined;
+
+        for (const part of pathParts) {
+            if (!currentLevel) return '';
+            foundNode = currentLevel.find(f => f.name === part);
+            if (!foundNode) return '';
+            currentLevel = foundNode.children;
+        }
+        return foundNode?.content || '';
+    }, [files]);
+    
+    useEffect(() => {
+        if (activeTab === 'preview' && iframeRef.current) {
+            // This is a simplified preview. For a real app, an in-browser bundler/transpiler
+            // would be needed to handle TSX and module imports correctly. For now,
+            // we just display the raw index.html, which may not function fully.
+            iframeRef.current.srcdoc = getFileContent('public/index.html');
+        }
+    }, [files, activeTab, getFileContent]);
 
     useEffect(() => {
-        if (terminalRef.current) {
-            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-        }
+        terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [logs]);
 
-    const handleGeneratePreview = useCallback(async () => {
-        setIsLoading(true);
-        addLog('User', 'Requested live preview generation.');
-        try {
-            const projectDescription = conversation.map(m => `${m.from}: ${m.text}`).join('\n');
-            const prompt = `Based on the following project description, generate a single, self-contained HTML file using Tailwind CSS for a simple visual preview. The HTML should represent the main page of the app. DO NOT include <html>, <head>, or <body> tags, only the content that would go inside the body tag. Make it visually appealing.\n\nDESCRIPTION:\n${projectDescription}`;
-            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
-            setPreviewContent(response.text);
-            addLog('Orchestrator', 'Generated live preview HTML.');
-        } catch(error) {
-            console.error("Error generating preview:", error);
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            setPreviewContent(`<p class="text-red-500 p-4">Error generating preview: ${errorMessage}</p>`);
-            addLog('Error', `Failed to generate preview: ${errorMessage}`);
-        }
-        setIsLoading(false);
-    }, [addLog, conversation]);
-
     return (
-        <aside className="w-1/3 max-w-2xl bg-gray-800/50 backdrop-blur-sm border-l border-gray-700 flex flex-col">
-            <div className="p-4 flex flex-col flex-grow h-1/2">
-                <div className="flex justify-between items-center mb-2">
-                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Live App Preview</h2>
-                    <button onClick={handleGeneratePreview} disabled={isLoading} className="flex items-center text-sm bg-sky-600 hover:bg-sky-500 text-white font-semibold py-1 px-3 rounded-md disabled:bg-gray-500 transition-colors">
-                        {isLoading ? <ArrowPathIcon spinning={true} /> : <SparklesIcon className="w-4 h-4 text-yellow-300"/>}
-                        <span className="ml-1.5">{isLoading ? 'Generating...' : 'Generate'}</span>
+        <aside className={`bg-gray-800/50 backdrop-blur-sm border-l border-gray-700 w-[500px] flex flex-col shrink-0 ${isFullscreen ? 'hidden' : ''}`}>
+            {/* Top part: Live App Preview + Terminal */}
+            <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center p-2 border-b border-gray-700 bg-gray-800">
+                    <button onClick={() => setActiveTab('preview')} className={`px-3 py-1 text-sm rounded-md ${activeTab === 'preview' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
+                        Live App Preview
                     </button>
+                    <button onClick={() => setActiveTab('terminal')} className={`px-3 py-1 text-sm rounded-md ml-2 ${activeTab === 'terminal' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>
+                        Terminal / Logs
+                    </button>
+                    <div className="ml-auto">
+                         <button onClick={onToggleFullscreen} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md">
+                            <FullscreenEnterIcon />
+                        </button>
+                    </div>
                 </div>
-                <div className="flex-grow bg-white rounded-lg shadow-inner overflow-hidden">
-                    <iframe srcDoc={`<style>html, body { height: 100%; margin: 0; }</style><script src="https://cdn.tailwindcss.com"></script><body class="bg-gray-100">${previewContent}</body>`} title="Live App Preview" className="w-full h-full border-0" sandbox="allow-scripts" />
+                <div className="flex-1 overflow-auto bg-gray-900">
+                    {activeTab === 'preview' && (
+                        <iframe ref={iframeRef} title="Live App Preview" className="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-same-origin"></iframe>
+                    )}
+                    {activeTab === 'terminal' && (
+                        <div className="p-2 font-mono text-xs text-gray-300">
+                            {logs.map((log, i) => (
+                                <div key={i} className="flex">
+                                    <span className="text-gray-500 mr-2">{log.time}</span>
+                                    <span className="text-purple-400 font-bold mr-2 w-28 shrink-0">[{log.source}]</span>
+                                    <p className="whitespace-pre-wrap">{log.message}</p>
+                                </div>
+                            ))}
+                            <div ref={terminalEndRef} />
+                        </div>
+                    )}
                 </div>
             </div>
-            <div className="h-1/2 p-4 flex flex-col border-t border-gray-700">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Terminal / Logs</h2>
-                <div ref={terminalRef} className="flex-grow bg-black rounded-lg p-3 font-mono text-xs text-gray-300 overflow-y-auto custom-scrollbar">
-                    {logs.map((log, i) => (
-                        <div key={i} className="flex">
-                            <span className="text-gray-500 mr-3 select-none">{log.time}</span>
-                            <span className="w-28 text-cyan-400 mr-3 shrink-0 select-none">[{log.source}]</span>
-                            <p className="flex-1 break-words whitespace-pre-wrap">{log.message}</p>
-                        </div>
-                    ))}
-                </div>
+
+            {/* Bottom part: Chat View */}
+            <div className="h-1/2 border-t border-gray-700">
+                <ChatView conversation={conversation} onSendMessage={onSendMessage} />
             </div>
         </aside>
     );
 };
 
-// --- MAIN APP COMPONENT ---
-export default function App() {
-  const [conversation, setConversation] = useState<Message[]>(initialConversation);
-  const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(initialTerminalLogs);
-  const [agents, setAgents] = useState<Agent[]>(initialAgents);
-  const [designDocument, setDesignDocument] = useState<string>('');
-  const [fileStructure, setFileStructure] = useState<FileNode[]>(initialFileStructure);
-  const [activeFile, setActiveFile] = useState<FileNode | null>(null);
-
-  const addLog = useCallback((source: string, message: string) => {
-    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    const newLog: TerminalLog = { time, source, message };
-    setTerminalLogs(prev => [...prev, newLog]);
-  }, []);
-  
-  const handleFileSelect = useCallback((file: FileNode) => {
-    setActiveFile(file);
-    addLog('Orchestrator', `Opened ${file.path} in editor.`);
-  }, [addLog]);
-
-  const updateFileContent = (files: FileNode[], path: string, newContent: string): FileNode[] => {
-      return files.map(file => {
-          if (file.path === path) {
-              return { ...file, content: newContent };
-          }
-          if (file.children) {
-              return { ...file, children: updateFileContent(file.children, path, newContent) };
-          }
-          return file;
-      });
-  };
-
-  const handleCodeChange = useCallback(async (file: FileNode, changeRequest: string) => {
-      setAgents(prev => prev.map(a => a.name === 'Frontend Coder' ? {...a, status: 'Active', task: `Updating ${file.name}...`} : a));
-      addLog('Frontend Coder', `Received request to modify ${file.path}: "${changeRequest}"`);
-
-      try {
-          const prompt = `You are an expert programmer. A user wants to modify the file "${file.path}".
-User's request: "${changeRequest}"
-
-Current content of ${file.path}:
-\`\`\`${file.extension}
-${file.content}
-\`\`\`
-
-Provide the full, updated content for the file ${file.path}. Your response should ONLY be the raw source code for the file, with no explanations, comments, or markdown formatting like \`\`\`${file.extension} ... \`\`\`.`;
-
-          const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
-          const newContent = response.text.trim();
-          
-          setFileStructure(prev => updateFileContent(prev, file.path, newContent));
-          setActiveFile(prev => prev ? { ...prev, content: newContent } : null);
-          addLog('Frontend Coder', `Successfully updated ${file.path}.`);
-
-      } catch (error) {
-          console.error("Error modifying code:", error);
-          const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-          addLog('Error', `Failed to modify ${file.path}: ${errorMessage}`);
-      } finally {
-          setAgents(prev => prev.map(a => a.name === 'Frontend Coder' ? {...a, status: 'Idle', task: undefined} : a));
-      }
-
-  }, [addLog]);
-
-  const handleProcessDocument = useCallback(async (docText: string) => {
-    if (!docText.trim()) return;
-
-    setDesignDocument('');
-    setAgents(prev => prev.map(a => a.name === 'UI/UX Architect' ? {...a, status: 'Active', task: 'Drafting design document...'} : a));
-    addLog('UI/UX Architect', 'Starting analysis of provided document to create a design.');
-
-    try {
-        const prompt = `You are a world-class AI System Architect. Your role is to create a conceptual design based on the user's project documentation. Do not generate code.
-
-Analyze the following documentation and generate a clear, structured design document in Markdown format. The document must have the following sections:
-
-### Functionality
-- Describe the system’s main features in a bulleted list.
-
-### Data Models
-- Define the main entities, their attributes, their relationships, and data formats.
-
-### API Design
-- Outline the key API endpoints, their purpose, request parameters, and response formats.
-
-### Technology Stack
-- Suggest appropriate tools, frameworks, and infrastructure.
-
-### User Interaction
-- Describe the flow of user actions and the main screens of the application.
-
-Ensure the content is simplified and logically organized. Your output should be only the Markdown document itself, without any surrounding text or explanations.
-
-DOCUMENTATION:
----
-${docText}
----`;
-        
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-        });
-        
-        setDesignDocument(response.text);
-        addLog('UI/UX Architect', `Successfully generated the design document.`);
-
-    } catch(error) {
-        console.error("Error processing document:", error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        addLog('Error', `Failed to generate design: ${errorMessage}`);
-    } finally {
-        setAgents(prev => prev.map(a => a.name === 'UI/UX Architect' ? {...a, status: 'Idle', task: undefined} : a));
-    }
-  }, [addLog]);
-
-  const handleSendMessage = useCallback(async (text: string) => {
-    const newUserMessage: Message = { from: 'user', text };
-    setConversation(prev => [...prev, newUserMessage]);
-    addLog('User', `Sent prompt: "${text}"`);
-
-    const commandPattern1 = /^@([\w\s/&]+)\s(.*)/i; // Matches: @Agent Name task description
-    const commandPattern2 = /^tell the ([\w\s/&]+) to (.*)/i; // Matches: tell the Agent Name to task description
-    const commandPattern3 = /^assign (.*) to the ([\w\s/&]+)/i; // Matches: assign task description to the Agent Name
-
-    const match1 = text.trim().match(commandPattern1);
-    const match2 = text.trim().match(commandPattern2);
-    const match3 = text.trim().match(commandPattern3);
-
-    let targetAgentName: string | null = null;
-    let taskDescription: string | null = null;
-
-    if (match1) {
-        targetAgentName = match1[1].trim();
-        taskDescription = match1[2].trim();
-    } else if (match2) {
-        targetAgentName = match2[1].trim();
-        taskDescription = match2[2].trim();
-    } else if (match3) {
-        targetAgentName = match3[2].trim();
-        taskDescription = match3[1].trim();
-    }
-
-    if (targetAgentName && taskDescription) {
-        const agentToUpdate = agents.find(agent => agent.name.toLowerCase() === targetAgentName!.toLowerCase());
-
-        if (agentToUpdate) {
-            setAgents(prevAgents => 
-                prevAgents.map(agent => {
-                    if (agent.name === agentToUpdate.name) {
-                        return { ...agent, status: 'Active', task: taskDescription! };
-                    }
-                    // Set other agents to idle for clarity
-                    return { ...agent, status: 'Idle', task: undefined };
-                })
-            );
-
-            const confirmationText = `Understood. The ${agentToUpdate.name} has been assigned the following task: "${taskDescription}".`;
-            const newAiMessage: Message = { from: 'ai', text: confirmationText };
-            setConversation(prev => [...prev, newAiMessage]);
-            addLog('Orchestrator', `Assigned task to ${agentToUpdate.name}: "${taskDescription}"`);
-            return; // Skip the generic Gemini call
-        }
-    }
+const App = () => {
+    const [files, setFiles] = useState<FileNode[]>(initialFileStructure);
+    const [activeFile, setActiveFile] = useState<FileNode | null>(initialFileStructure[0]?.children?.[0] ?? null);
+    const [agents, setAgents] = useState<Agent[]>(initialAgents);
+    const [conversation, setConversation] = useState<Message[]>(initialConversation);
+    const [logs, setLogs] = useState<TerminalLog[]>(initialTerminalLogs);
+    const [isFullscreen, setIsFullscreen] = useState(false);
     
-    try {
-        const prompt = `You are an AI Project Manager named Orchestrator. A user said: "${text}". Respond concisely as a project manager, explaining the next steps your AI agent team will take. Use markdown for lists.`;
-        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
-        const newAiMessage: Message = { from: 'ai', text: response.text };
-        setConversation(prev => [...prev, newAiMessage]);
-        addLog('Orchestrator', `Responded: "${response.text.substring(0, 70)}..."`);
-    } catch(error) {
-        console.error("Error calling Gemini API:", error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        const newAiMessage: Message = { from: 'ai', text: `Sorry, I encountered an error: ${errorMessage}` };
-        setConversation(prev => [...prev, newAiMessage]);
-        addLog('Error', `API Call Failed: ${errorMessage}`);
-    }
-  }, [addLog, agents]);
+    const addLog = useCallback((source: string, message: string) => {
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+        setLogs(prev => [...prev.slice(-100), { time, source, message }]); // Keep last 100 logs
+    }, []);
 
-  return (
-    <>
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #718096; }
-        .dot-flashing { position: relative; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dotFlashing 1s infinite linear alternate; animation-delay: .5s; }
-        .dot-flashing::before, .dot-flashing::after { content: ''; display: inline-block; position: absolute; top: 0; }
-        .dot-flashing::before { left: -10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dotFlashing 1s infinite alternate; animation-delay: 0s; }
-        .dot-flashing::after { left: 10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dotFlashing 1s infinite alternate; animation-delay: 1s; }
-        @keyframes dotFlashing { 0% { background-color: #6b7280; } 50%, 100% { background-color: #d1d5db; } }
-      `}</style>
-      <div className="flex h-screen w-full bg-gray-900 font-sans text-sm">
-        <LeftPanel agents={agents} files={fileStructure} onFileSelect={handleFileSelect} activeFile={activeFile} />
-        <CenterPanel
-            conversation={conversation}
-            addLog={addLog}
-            onSendMessage={handleSendMessage}
-            onProcessDocument={handleProcessDocument}
-            designDocument={designDocument}
-            activeFile={activeFile}
-            onCodeChange={handleCodeChange}
-        />
-        <RightPanel conversation={conversation} logs={terminalLogs} addLog={addLog} />
-      </div>
-    </>
-  );
+    const updateFileContent = useCallback((path: string, newContent: string) => {
+        setFiles(prevFiles => {
+            const newFiles = JSON.parse(JSON.stringify(prevFiles));
+            
+            let found = false;
+            function findAndUpdate(nodes: FileNode[]) {
+                if (found) return;
+                for (let i = 0; i < nodes.length; i++) {
+                    if (nodes[i].path === path) {
+                        nodes[i].content = newContent;
+                        found = true;
+                        return;
+                    }
+                    if (nodes[i].children) {
+                        findAndUpdate(nodes[i].children!);
+                    }
+                }
+            }
+    
+            findAndUpdate(newFiles);
+            return newFiles;
+        });
+
+        setActiveFile(prevActiveFile => {
+            if (prevActiveFile?.path === path) {
+                return { ...prevActiveFile, content: newContent };
+            }
+            return prevActiveFile;
+        });
+    }, []);
+
+    const handleCodeChange = useCallback((newContent: string) => {
+        if (activeFile) {
+            updateFileContent(activeFile.path, newContent);
+        }
+    }, [activeFile, updateFileContent]);
+    
+    const formatCode = useCallback(() => {
+        if (!activeFile || typeof activeFile.content !== 'string') return;
+        
+        // @ts-ignore
+        const prettier = window.prettier;
+        // @ts-ignore
+        const prettierPlugins = window.prettierPlugins;
+        
+        if (!prettier || !prettierPlugins || !prettierPlugins.babel || !prettierPlugins.html || !prettierPlugins.estree) {
+            addLog('Error', 'Prettier library or plugins not found.');
+            console.error('Prettier not available on window object');
+            return;
+        }
+        
+        let parser: string;
+        switch (activeFile.extension) {
+            case 'html': parser = 'html'; break;
+            case 'json': parser = 'json'; break;
+            case 'tsx': case 'ts': case 'js':
+                parser = 'babel'; break;
+            default:
+                addLog('Editor', `Formatting not supported for .${activeFile.extension} files.`);
+                return;
+        }
+        
+        try {
+            const formatted = prettier.format(activeFile.content, {
+                parser: parser,
+                plugins: [prettierPlugins.babel, prettierPlugins.html, prettierPlugins.estree],
+                semi: true,
+                singleQuote: true,
+                jsxSingleQuote: false,
+                trailingComma: 'all',
+            });
+            updateFileContent(activeFile.path, formatted);
+            addLog('Editor', `Formatted ${activeFile.name}`);
+        } catch (error) {
+            console.error('Prettier formatting error:', error);
+            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+            addLog('Error', `Failed to format ${activeFile.name}: ${errorMessage}`);
+        }
+    }, [activeFile, addLog, updateFileContent]);
+
+    const handleSendMessage = async (text: string) => {
+        const newUserMessage: Message = { from: 'user', text };
+        setConversation(prev => [...prev, newUserMessage]);
+        addLog('User', text);
+        
+        const aiResponse: Message = { from: 'ai', text: "I have received your instruction. My team and I will get to work." };
+        setTimeout(() => {
+            setConversation(prev => [...prev, aiResponse]);
+            addLog('Orchestrator', aiResponse.text);
+        }, 1000);
+    };
+
+    const handleToggleFullscreen = useCallback(() => {
+        const doc = window.document;
+        const isCurrentlyFullscreen = doc.fullscreenElement != null;
+
+        if (!isCurrentlyFullscreen) {
+            doc.documentElement.requestFullscreen().catch(err => {
+                alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+            });
+        } else {
+             if (doc.exitFullscreen) {
+                doc.exitFullscreen();
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        const fullscreenChangeHandler = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        const keydownHandler = (e: KeyboardEvent) => {
+            if (e.key === 'F11') {
+                e.preventDefault();
+                handleToggleFullscreen();
+            }
+        };
+
+        document.addEventListener('fullscreenchange', fullscreenChangeHandler);
+        document.addEventListener('keydown', keydownHandler);
+
+        return () => {
+            document.removeEventListener('fullscreenchange', fullscreenChangeHandler);
+            document.removeEventListener('keydown', keydownHandler);
+        };
+    }, [handleToggleFullscreen]);
+    
+    const getFileContent = useCallback((path: string): string => {
+        const pathParts = path.replace(/^\//, '').split('/');
+        let currentLevel: FileNode[] | undefined = files;
+        let foundNode: FileNode | undefined;
+
+        for (const part of pathParts) {
+            if (!currentLevel) return '';
+            foundNode = currentLevel.find(f => f.name === part);
+            if (!foundNode) return '';
+            currentLevel = foundNode.children;
+        }
+        return foundNode?.content || '';
+    }, [files]);
+
+    return (
+        <div className="grid h-screen w-screen bg-gray-900 text-white font-sans overflow-hidden" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
+            <LeftPanel agents={agents} files={files} onFileSelect={setActiveFile} activeFile={activeFile} />
+            
+            <main className={`flex-1 flex flex-col min-w-0 ${isFullscreen ? 'hidden' : ''}`}>
+                 <CenterPanel activeFile={activeFile} onCodeChange={handleCodeChange} formatCode={formatCode} addLog={addLog} />
+            </main>
+
+            <RightPanel
+                conversation={conversation}
+                onSendMessage={handleSendMessage}
+                logs={logs}
+                files={files}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={handleToggleFullscreen}
+            />
+
+            {/* Fullscreen Preview Portal */}
+            {isFullscreen && (
+                <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col">
+                     <div className="p-2 bg-gray-800 flex justify-end shrink-0">
+                         <button onClick={handleToggleFullscreen} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md">
+                             <FullscreenExitIcon />
+                         </button>
+                     </div>
+                     <iframe srcDoc={getFileContent('public/index.html')} title="Live App Preview" className="w-full flex-1 border-0 bg-white" sandbox="allow-scripts allow-same-origin"></iframe>
+                </div>
+            )}
+        </div>
+    );
 }
+
+// Inject styles for custom scrollbar and loading animation
+const style = document.createElement('style');
+style.textContent = `
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(107, 114, 128, 0.5); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
+    
+    .dot-flashing { position: relative; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite linear alternate; animation-delay: 0.5s; }
+    .dot-flashing::before, .dot-flashing::after { content: ''; display: inline-block; position: absolute; top: 0; }
+    .dot-flashing::before { left: -10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite alternate; animation-delay: 0s; }
+    .dot-flashing::after { left: 10px; width: 6px; height: 6px; border-radius: 5px; background-color: #9880ff; color: #9880ff; animation: dot-flashing 1s infinite alternate; animation-delay: 1s; }
+    @keyframes dot-flashing { 0% { background-color: #9880ff; } 50%, 100% { background-color: rgba(152, 128, 255, 0.2); } }
+`;
+document.head.appendChild(style);
+
+export default App;
