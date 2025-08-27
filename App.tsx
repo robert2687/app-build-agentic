@@ -669,6 +669,50 @@ ${docText}
     const newUserMessage: Message = { from: 'user', text };
     setConversation(prev => [...prev, newUserMessage]);
     addLog('User', `Sent prompt: "${text}"`);
+
+    const commandPattern1 = /^@([\w\s/&]+)\s(.*)/i; // Matches: @Agent Name task description
+    const commandPattern2 = /^tell the ([\w\s/&]+) to (.*)/i; // Matches: tell the Agent Name to task description
+    const commandPattern3 = /^assign (.*) to the ([\w\s/&]+)/i; // Matches: assign task description to the Agent Name
+
+    const match1 = text.trim().match(commandPattern1);
+    const match2 = text.trim().match(commandPattern2);
+    const match3 = text.trim().match(commandPattern3);
+
+    let targetAgentName: string | null = null;
+    let taskDescription: string | null = null;
+
+    if (match1) {
+        targetAgentName = match1[1].trim();
+        taskDescription = match1[2].trim();
+    } else if (match2) {
+        targetAgentName = match2[1].trim();
+        taskDescription = match2[2].trim();
+    } else if (match3) {
+        targetAgentName = match3[2].trim();
+        taskDescription = match3[1].trim();
+    }
+
+    if (targetAgentName && taskDescription) {
+        const agentToUpdate = agents.find(agent => agent.name.toLowerCase() === targetAgentName!.toLowerCase());
+
+        if (agentToUpdate) {
+            setAgents(prevAgents => 
+                prevAgents.map(agent => {
+                    if (agent.name === agentToUpdate.name) {
+                        return { ...agent, status: 'Active', task: taskDescription! };
+                    }
+                    // Set other agents to idle for clarity
+                    return { ...agent, status: 'Idle', task: undefined };
+                })
+            );
+
+            const confirmationText = `Understood. The ${agentToUpdate.name} has been assigned the following task: "${taskDescription}".`;
+            const newAiMessage: Message = { from: 'ai', text: confirmationText };
+            setConversation(prev => [...prev, newAiMessage]);
+            addLog('Orchestrator', `Assigned task to ${agentToUpdate.name}: "${taskDescription}"`);
+            return; // Skip the generic Gemini call
+        }
+    }
     
     try {
         const prompt = `You are an AI Project Manager named Orchestrator. A user said: "${text}". Respond concisely as a project manager, explaining the next steps your AI agent team will take. Use markdown for lists.`;
@@ -683,7 +727,7 @@ ${docText}
         setConversation(prev => [...prev, newAiMessage]);
         addLog('Error', `API Call Failed: ${errorMessage}`);
     }
-  }, [addLog]);
+  }, [addLog, agents]);
 
   return (
     <>
