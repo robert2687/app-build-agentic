@@ -6,6 +6,7 @@ import {
 } from "react-resizable-panels";
 import Editor from "@monaco-editor/react";
 import { useState, useMemo } from 'react';
+import { generateGeminiContent } from './geminiApi';
 import "./App.css";
 
 // 1. Data structure of our files
@@ -119,6 +120,11 @@ function App() {
                   wordWrap: "on",
                 }}
               />
+              {/* Gemini API Demo */}
+              <div style={{ marginTop: 16, background: '#222', padding: 16, borderRadius: 8 }}>
+                <h3 style={{ color: '#fff' }}>Gemini API Demo</h3>
+                <GeminiDemo />
+              </div>
             </Panel>
 
             <PanelResizeHandle className="resize-handle" />
@@ -135,6 +141,51 @@ function App() {
 }
 
 export default App;
+
+// Gemini API Demo Component
+function GeminiDemo() {
+  const [prompt, setPrompt] = useState("");
+  const [response, setResponse] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setResponse("");
+    try {
+      const res = await generateGeminiContent(prompt);
+      setResponse(res);
+    } catch (err: any) {
+      setError(err.message || "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <textarea
+        value={prompt}
+        onChange={e => setPrompt(e.target.value)}
+        placeholder="Enter a prompt for Gemini..."
+        rows={3}
+        style={{ resize: 'vertical', fontSize: 14, padding: 8 }}
+        required
+      />
+      <button type="submit" disabled={loading} style={{ width: 120, alignSelf: 'flex-start' }}>
+        {loading ? 'Loading...' : 'Ask Gemini'}
+      </button>
+      {response && (
+        <div style={{ marginTop: 8, color: '#b5f' }}><strong>Gemini:</strong> {response}</div>
+      )}
+      {error && (
+        <div style={{ marginTop: 8, color: 'red' }}><strong>Error:</strong> {error}</div>
+      )}
+    </form>
+  );
+}
 
 // Example code that will be displayed in the editor on startup
 const exampleCode = `import React from 'react';
