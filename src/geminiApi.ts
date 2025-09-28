@@ -4,7 +4,7 @@
 const GEMINI_API_KEY = "AIzaSyCpW5YPWKE0S_8Vwlr2Ceo2FT6d9tJIPH4";
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent";
 
-export async function generateGeminiContent(prompt) {
+export async function generateGeminiContent(prompt): Promise<any> {
   const body = {
     contents: [{ parts: [{ text: prompt }] }]
   };
