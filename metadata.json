@@ -1,5 +1,5 @@
 {
-  "name": "Agentic - AI Development Environment",
+  "name": "Agentic - AI Dev-110",
   "description": "A supervisory dashboard for managing a team of AI agents that build, test, and deploy software. Based on the Agentic whitepaper, this UI allows users to provide instructions, review generated code, and watch the development process unfold in real-time.",
   "requestFramePermissions": []
 }
