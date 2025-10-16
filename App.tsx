@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
@@ -48,10 +49,11 @@ const FallbackComponent = ({ error }: { error: Error | null }) => (
 );
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // FIX: Replaced constructor with a state property initializer.
-  // This modern syntax resolves TypeScript errors where `this.state` and `this.props`
-  // were not being correctly recognized on the component instance.
-  state: ErrorBoundaryState = { hasError: false, error: null };
+  // FIX: Reverted to using a standard constructor to initialize state. The class property syntax was causing `this.props` to be unrecognized by TypeScript. Calling `super(props)` in the constructor resolves this.
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -320,6 +322,7 @@ const LogoIcon = () => <svg className="h-6 w-6 text-blue-400" viewBox="0 0 24 24
 const ExplorerIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>;
 const SourceControlIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>;
 const AgentsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clipRule="evenodd" /></svg>;
+const ChecklistIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>;
 const CloseIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 const FolderIcon = ({ open }: { open?: boolean }) => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d={open ? "M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" : "M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"} /></svg>;
 const GenericFileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 mr-2 shrink-0 text-gray-400`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>;
@@ -411,6 +414,7 @@ const ActivityBar: React.FC<{ activeView: string; setActiveView: (view: string) 
     const views = [
         { id: 'explorer', icon: <ExplorerIcon />, label: 'Explorer' },
         { id: 'source-control', icon: <SourceControlIcon />, label: 'Source Control' },
+        { id: 'checklist', icon: <ChecklistIcon />, label: 'Triage Checklist' },
     ];
     return (
         <div className="w-12 bg-gray-900 flex flex-col justify-between items-center py-2 shrink-0 border-r border-gray-700">
@@ -582,6 +586,34 @@ const FileExplorer: React.FC<{ files: FileNode[]; activeFile: string | null; onS
     );
 };
 
+const checklistItems = [
+    { title: 'Error visibility', description: 'Enable structured error handling with user-friendly messages and dev-only stack traces.' },
+    { title: 'Type safety', description: 'Strict TypeScript everywhere, no any. Add types for env, configs, API payloads, and UI props.' },
+    { title: 'State hygiene', description: 'Remove hidden side effects, centralize async flows, and debounce/abort fetches.' },
+    { title: 'Config sanity', description: 'Validate envs at startup; fail fast with actionable tips.' },
+    { title: 'Performance', description: 'Audit bundle size, memoization, and request batching. Ship sensible defaults.' },
+    { title: 'Accessibility', description: 'Keyboard paths, focus management, ARIA roles, color contrast, and reduced motion.' },
+    { title: 'Governance', description: 'Pre-commit hooks, CI checks, PR annotations, and contributor checklist.' },
+];
+
+const ChecklistPanel: React.FC = () => (
+    <div className="h-full p-2 overflow-y-auto text-white text-sm custom-scrollbar">
+        <CollapsibleSection title="Triage Checklist" defaultOpen={true}>
+            <div className="space-y-2 py-2">
+                {checklistItems.map((item, index) => (
+                    <div key={index} className="bg-gray-900/40 p-3 rounded-md">
+                        <h3 className="font-semibold text-blue-400 flex items-center text-sm">
+                            <CheckCircleIcon />
+                            <span className="ml-2">{item.title}</span>
+                        </h3>
+                        <p className="mt-1 text-gray-400 text-xs leading-normal pl-6">{item.description}</p>
+                    </div>
+                ))}
+            </div>
+        </CollapsibleSection>
+    </div>
+);
+
 const SourceControlPanel: React.FC<{ modifiedFiles: string[]; }> = ({ modifiedFiles }) => (
     <div className="h-full p-2 overflow-y-auto text-white text-sm custom-scrollbar">
         <div className="mb-4">
@@ -614,6 +646,7 @@ const Sidebar: React.FC<{
     <div className="w-64 bg-gray-800 text-white flex-shrink-0 border-r border-gray-700">
         {props.activeView === 'explorer' && <FileExplorer files={props.files} activeFile={props.activeFile} onSelect={props.onSelectFile} modifiedFiles={props.modifiedFiles} />}
         {props.activeView === 'source-control' && <SourceControlPanel modifiedFiles={props.modifiedFiles} />}
+        {props.activeView === 'checklist' && <ChecklistPanel />}
     </div>
 );
 
@@ -1125,7 +1158,7 @@ export function App() {
     // State
     const [files, setFiles] = useState<FileNode[]>(initialFiles);
     const [agents, setAgents] = useState<Agent[]>(initialAgents);
-    const [activeView, setActiveView] = useState('explorer'); // 'explorer', 'source-control'
+    const [activeView, setActiveView] = useState('explorer'); // 'explorer', 'source-control', 'checklist'
     const [activeMainTab, setActiveMainTab] = useState<'code' | 'preview' | 'plan'>('code');
     const [openFiles, setOpenFiles] = useState<string[]>(['/src/App.tsx']);
     const [activeFile, setActiveFile] = useState<string | null>('/src/App.tsx');
