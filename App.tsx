@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
@@ -623,7 +624,10 @@ export type Env = z.infer<typeof EnvSchema>;`
 import { Component, type ReactNode } from "react";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error?: Error }> {
-  state = { error: undefined };
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: undefined };
+  }
   componentDidCatch(error: Error) { this.setState({ error }); }
   render() {
     if (this.state.error) {
@@ -656,6 +660,102 @@ export async function safeJson<T>(res: Response): Promise<T> {
 }`
         }]
     },
+    {
+        title: 'Abort + Retry with Jitter',
+        description: 'Implement a retry mechanism with exponential backoff and jitter to gracefully handle transient network errors. Use an AbortSignal to cancel ongoing requests when retrying.',
+        codeSnippets: [{
+            filename: 'src/services/retry.ts',
+            language: 'typescript',
+            code: `// src/services/retry.ts
+export async function retry<T>(fn: (signal: AbortSignal) => Promise<T>, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    const controller = new AbortController();
+    try { return await fn(controller.signal); }
+    catch (e) {
+      const backoff = Math.min(2000, 200 * 2 ** i) + Math.random() * 100;
+      await new Promise(r => setTimeout(r, backoff));
+    }
+  }
+  throw new Error("Retries exhausted");
+}`
+        }]
+    },
+    {
+        title: 'Focus & Keyboard Accessibility',
+        description: 'Ensure robust accessibility by managing focus after route changes or dialogs (trapping it in modals) and providing discoverable keyboard shortcuts with hints in tooltips.',
+    },
+    {
+        title: 'Color, Contrast, and Theming',
+        description: 'Design for inclusivity by using semantic color tokens that meet WCAG AA contrast standards by default, and offer a high-contrast theme toggle for users who need it.',
+    },
+    {
+        title: 'Pre-commit Hooks',
+        description: 'Enforce code quality at the source by integrating pre-commit hooks that run linting, type checks, and style validation before any code is committed.',
+        codeSnippets: [{
+            filename: '.pre-commit-config.yaml',
+            language: 'yaml',
+            code: `# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: eslint
+        entry: npx eslint --max-warnings=0 .
+        language: node
+      - id: types
+        name: typecheck
+        entry: npx tsc --noEmit
+        language: node
+      - id: style
+        name: stylelint
+        entry: npx stylelint "**/*.{css,scss}"
+        language: node
+      - id: tests
+        name: tests
+        entry: npm test --silent
+        language: system`
+        }]
+    },
+    {
+        title: 'Contributor PR Checklist',
+        description: 'Streamline the review process and maintain standards with a pull request template that includes a checklist for types, schemas, accessibility, tests, and documentation.',
+        codeSnippets: [{
+            filename: '.github/pull_request_template.md',
+            language: 'markdown',
+            code: `<!-- .github/pull_request_template.md -->
+- [ ] **Types:** No \`any\`, exported types documented
+- [ ] **Schemas:** All IO validated with Zod
+- [ ] **Accessibility:** Keyboard/focus paths covered
+- [ ] **Tests:** Added/updated with edge cases
+- [ ] **DX:** Docs + examples updated
+- [ ] **CI:** Lint/type/test passing, annotations clean`
+        }]
+    },
+    {
+        title: 'Continuous Integration Pipeline',
+        description: 'Automate quality assurance with a CI workflow that checks out code, runs all checks (lint, types, tests), builds the project, and uploads artifacts for review.',
+        codeSnippets: [{
+            filename: '.github/workflows/ci.yml',
+            language: 'yaml',
+            code: `# .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test -- --ci --reporters=default --reporters=jest-junit
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with: { name: build, path: dist }`
+        }]
+    }
 ];
 
 const ChecklistPanel: React.FC = () => (
