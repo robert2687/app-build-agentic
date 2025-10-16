@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as prettier from "https://esm.sh/prettier@3.3.2/standalone";
@@ -27,29 +25,36 @@ const ErrorIconFallback = () => (
     </svg>
 );
 
-const FallbackComponent = ({ error }: { error: Error | null }) => (
+const FallbackComponent = ({ error, onRetry }: { error: Error | null; onRetry: () => void; }) => (
     <div className="bg-gray-900 text-white h-screen w-screen flex items-center justify-center font-sans">
-        <div className="bg-gray-800 border border-gray-700 rounded-lg p-8 max-w-lg text-center shadow-2xl">
+        <div className="bg-gray-800 border border-gray-700 rounded-lg p-8 max-w-2xl text-center shadow-2xl">
             <ErrorIconFallback />
             <h1 className="text-3xl font-bold text-red-400 mb-2">Something went wrong.</h1>
-            <p className="text-gray-400 mb-6">An unexpected error occurred. Please try refreshing the application.</p>
+            <p className="text-gray-400 mb-6">An unexpected error occurred. You can try to retry or refresh the page.</p>
             {error && (
-                <pre className="bg-gray-900 text-left p-4 rounded-md text-sm text-red-300 overflow-auto mb-6 custom-scrollbar">
-                    <code>{error.toString()}</code>
+                <pre className="bg-gray-900 text-left p-4 rounded-md text-sm text-red-300 overflow-auto mb-6 custom-scrollbar max-h-60">
+                    <code>{error.stack || error.toString()}</code>
                 </pre>
             )}
-            <button
-                onClick={() => window.location.reload()}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-6 rounded-md transition-colors"
-            >
-                Refresh Page
-            </button>
+            <div className="flex justify-center space-x-4">
+                <button
+                    onClick={onRetry}
+                    className="bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-6 rounded-md transition-colors"
+                >
+                    Retry
+                </button>
+                <button
+                    onClick={() => window.location.reload()}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-6 rounded-md transition-colors"
+                >
+                    Refresh Page
+                </button>
+            </div>
         </div>
     </div>
 );
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // FIX: Reverted to using a standard constructor to initialize state. The class property syntax was causing `this.props` to be unrecognized by TypeScript. Calling `super(props)` in the constructor resolves this.
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -63,9 +68,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     console.error("Uncaught error:", error, errorInfo);
   }
 
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   render() {
     if (this.state.hasError) {
-      return <FallbackComponent error={this.state.error} />;
+      return <FallbackComponent error={this.state.error} onRetry={this.handleRetry} />;
     }
 
     return this.props.children;
@@ -587,26 +596,90 @@ const FileExplorer: React.FC<{ files: FileNode[]; activeFile: string | null; onS
 };
 
 const checklistItems = [
-    { title: 'Error visibility', description: 'Enable structured error handling with user-friendly messages and dev-only stack traces.' },
-    { title: 'Type safety', description: 'Strict TypeScript everywhere, no any. Add types for env, configs, API payloads, and UI props.' },
-    { title: 'State hygiene', description: 'Remove hidden side effects, centralize async flows, and debounce/abort fetches.' },
-    { title: 'Config sanity', description: 'Validate envs at startup; fail fast with actionable tips.' },
-    { title: 'Performance', description: 'Audit bundle size, memoization, and request batching. Ship sensible defaults.' },
-    { title: 'Accessibility', description: 'Keyboard paths, focus management, ARIA roles, color contrast, and reduced motion.' },
-    { title: 'Governance', description: 'Pre-commit hooks, CI checks, PR annotations, and contributor checklist.' },
+    {
+        title: 'Schema-Driven I/O Validation',
+        description: 'Use a library like Zod to validate environment variables and API payloads at runtime. This prevents bugs from invalid data structures and provides clear error messages.',
+        codeSnippets: [{
+            filename: 'src/domain/schemas.ts',
+            language: 'typescript',
+            code: `// src/domain/schemas.ts
+import { z } from "zod";
+
+export const EnvSchema = z.object({
+  NODE_ENV: z.enum(["development","test","production"]),
+  API_URL: z.string().url(),
+  AI_KEY: z.string().min(10),
+});
+export type Env = z.infer<typeof EnvSchema>;`
+        }]
+    },
+    {
+        title: 'Global Error Boundary',
+        description: 'Implement a global error boundary to catch unexpected errors and provide a user-friendly fallback UI. Include a retry mechanism and detailed error information for developers.',
+        codeSnippets: [{
+            filename: 'src/ui/ErrorBoundary.tsx',
+            language: 'tsx',
+            code: `// src/ui/ErrorBoundary.tsx
+import { Component, type ReactNode } from "react";
+
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error?: Error }> {
+  state = { error: undefined };
+  componentDidCatch(error: Error) { this.setState({ error }); }
+  render() {
+    if (this.state.error) {
+      return (
+        <section role="alert" aria-live="assertive">
+          <h2>Something went wrong</h2>
+          {process.env.NODE_ENV !== "production" && (
+            <pre>{this.state.error.stack}</pre>
+          )}
+          <button onClick={() => this.setState({ error: undefined })}>Retry</button>
+        </section>
+      );
+    }
+    return this.props.children;
+  }
+}`
+        }]
+    },
+    {
+        title: 'Robust Network Helpers',
+        description: 'Create helper functions for network requests that handle non-ok responses and safely parse JSON, preventing crashes from unexpected API responses.',
+        codeSnippets: [{
+            filename: 'src/services/http.ts',
+            language: 'typescript',
+            code: `// src/services/http.ts
+export async function safeJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try { return JSON.parse(text) as T; }
+  catch { throw new Error(\`Invalid JSON (\${res.status}): \${text.slice(0,200)}\`); }
+}`
+        }]
+    },
 ];
 
 const ChecklistPanel: React.FC = () => (
     <div className="h-full p-2 overflow-y-auto text-white text-sm custom-scrollbar">
         <CollapsibleSection title="Triage Checklist" defaultOpen={true}>
-            <div className="space-y-2 py-2">
+            <div className="space-y-4 py-2">
                 {checklistItems.map((item, index) => (
                     <div key={index} className="bg-gray-900/40 p-3 rounded-md">
-                        <h3 className="font-semibold text-blue-400 flex items-center text-sm">
+                        <h3 className="font-semibold text-blue-400 flex items-center text-sm mb-2">
                             <CheckCircleIcon />
                             <span className="ml-2">{item.title}</span>
                         </h3>
-                        <p className="mt-1 text-gray-400 text-xs leading-normal pl-6">{item.description}</p>
+                        <p className="text-gray-400 text-xs leading-normal pl-6 mb-3">{item.description}</p>
+                        
+                        {item.codeSnippets && item.codeSnippets.map((snippet, sIndex) => (
+                            <div key={sIndex} className="ml-6 bg-gray-900 rounded-md border border-gray-700 overflow-hidden">
+                                <div className="text-xs text-gray-400 bg-gray-800 px-3 py-1 border-b border-gray-700">
+                                    {snippet.filename}
+                                </div>
+                                <pre className="p-3 text-xs custom-scrollbar overflow-auto font-mono">
+                                    <code>{snippet.code}</code>
+                                </pre>
+                            </div>
+                        ))}
                     </div>
                 ))}
             </div>
